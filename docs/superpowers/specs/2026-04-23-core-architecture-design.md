@@ -410,8 +410,10 @@ Explicit non-goals for this PoC:
 
 - **Exact Claude Code hook event.** `Stop` is the current candidate for per-turn token capture; the implementation plan confirms via Claude Code documentation and an integration smoke-test.
 - **Concrete tolerance for token-budget assertions.** Set after the first end-to-end measurement pass on one scenario; not guessed in advance.
-- **Default clone path when the agent offers to clone.** `~/src/<org>/<repo>` is the current default, but worth a one-line Claude Code `settings.json` knob for teams that have a convention.
+- **Default clone path when the agent offers to clone.** `~/src/<org>/<repo>` is the current default, but worth a one-line Claude Code `settings.json` knob for teams that have a convention. (See also §9.1 step 3.)
 - **Shallow vs. full clones when the agent clones on the user's behalf.** Full clone is the default for PoC (blame/history-preserving); shallow is a future optimization.
+
+**Doc 4 (reference scenario walkthrough) is a *soft* prerequisite for the implementation plan, not a hard one.** The plan can begin with a single placeholder scenario (`create-log-index`, the worked example already threaded through this spec) and expand the scenario matrix (§11.5) as doc 4 formalizes the others. The architectural work — plugin scaffolding, fixture repo shape, detection ladder, measurement hook — does not depend on the final scenario list.
 
 ## 16. Dependencies and references
 
