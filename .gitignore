@@ -1,2 +1,5 @@
 .superpowers/
 .worktrees/
+
+# Nested fixture git repos — track the working tree, ignore the git state
+fixtures/*/.git
