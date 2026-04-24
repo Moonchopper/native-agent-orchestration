@@ -44,6 +44,10 @@ HANDOFF_FILE="$FIXTURE_REPO/.stage-1-handoff.json"
 # Clean any prior handoff artifact so the assertion reflects this run only.
 rm -f "$HANDOFF_FILE"
 
+# Also clean any drafted Terraform from a prior run so re-runs are
+# self-contained and the agent's Step-8 diff reflects this run only.
+rm -f "$FIXTURE_REPO/terraform/logs/indexes/foobar.tf"
+
 # Canned prompt — provides all inputs up front so the agent can proceed
 # without an interactive confirmation loop.
 PROMPT=$(cat <<'EOF'
@@ -83,5 +87,7 @@ ASSERTION_SCRIPT="$REPO_ROOT/scripts/assertions/${SCENARIO}-${VARIANT}.sh"
 if [ -x "$ASSERTION_SCRIPT" ]; then
   "$ASSERTION_SCRIPT" "$HANDOFF_FILE"
 else
-  echo "WARN: no assertion script at $ASSERTION_SCRIPT — skipping assertions" >&2
+  echo "ERROR: no assertion script at $ASSERTION_SCRIPT" >&2
+  echo "A scenario/variant pair that passes the runner's allowlist must have a matching assertion script." >&2
+  exit 1
 fi
