@@ -34,6 +34,53 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
-# Real run — implemented in Task 10.
-echo "ERROR: non-dry-run not yet implemented (Task 10)" >&2
-exit 1
+# --- Real run ---
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+FIXTURE_REPO="$REPO_ROOT/fixtures/datadog-operations"
+SESSION_DIR=$(mktemp -d)
+HANDOFF_FILE="$FIXTURE_REPO/.stage-1-handoff.json"
+
+# Clean any prior handoff artifact so the assertion reflects this run only.
+rm -f "$HANDOFF_FILE"
+
+# Canned prompt — provides all inputs up front so the agent can proceed
+# without an interactive confirmation loop.
+PROMPT=$(cat <<'EOF'
+Create a Datadog log index with these parameters:
+- team: foobar
+- env: prod
+- filter: service:foobar-api env:prod
+- tier: Flex
+- days: 30
+- quota: 1000000
+
+Accept best-practice suggestions as-is. When the PR payload is ready,
+hand off to the _pr-handoff skill.
+EOF
+)
+
+# Invoke Claude Code headlessly from the fixture repo's working tree so
+# the CWD-detection ladder hits its first branch.
+cd "$FIXTURE_REPO"
+
+# `claude -p` runs non-interactively. Settings override is intentionally
+# left empty for Stage 1; in Stage 2 we'll pass a settings.json with the
+# metric-capture hook configured.
+claude -p "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
+  echo "ERROR: claude invocation failed" >&2
+  echo "--- stderr ---" >&2
+  cat "$SESSION_DIR/session.err" >&2
+  exit 1
+}
+
+echo "Scenario completed. Session artifacts in: $SESSION_DIR"
+echo "Handoff file: $HANDOFF_FILE"
+
+# Run scenario-specific assertions.
+ASSERTION_SCRIPT="$REPO_ROOT/scripts/assertions/${SCENARIO}-${VARIANT}.sh"
+if [ -x "$ASSERTION_SCRIPT" ]; then
+  "$ASSERTION_SCRIPT" "$HANDOFF_FILE"
+else
+  echo "WARN: no assertion script at $ASSERTION_SCRIPT — skipping assertions" >&2
+fi
