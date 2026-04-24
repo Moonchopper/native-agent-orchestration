@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
 HANDOFF_FILE="${1:?handoff file path required}"
-FIXTURE_REPO="$REPO_ROOT/fixtures/datadog-operations"
+# Derive the fixture repo root from the handoff file location rather than
+# git rev-parse, which would resolve to whatever repo CWD is currently inside
+# (the runner cd's into the fixture repo before invoking this script).
+FIXTURE_REPO=$(cd "$(dirname "$HANDOFF_FILE")" && pwd)
 
 fail() { echo "ASSERTION FAILED: $*" >&2; exit 1; }
 
