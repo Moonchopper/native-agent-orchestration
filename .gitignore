@@ -3,3 +3,6 @@
 
 # Nested fixture git repos — track the working tree, ignore the git state
 fixtures/*/.git
+
+# Vendored bats-core test runner — cloned on setup, not tracked
+.bats/
