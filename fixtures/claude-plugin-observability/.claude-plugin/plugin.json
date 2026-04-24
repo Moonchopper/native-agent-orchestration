@@ -1,0 +1,5 @@
+{
+  "name": "observability",
+  "description": "Platform team's Datadog and observability golden paths (fixture for PoC)",
+  "version": "0.1.0"
+}
