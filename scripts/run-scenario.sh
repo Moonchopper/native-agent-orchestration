@@ -51,7 +51,12 @@ rm -f "$FIXTURE_REPO/terraform/logs/indexes/foobar.tf"
 # Canned prompt — provides all inputs up front so the agent can proceed
 # without an interactive confirmation loop.
 PROMPT=$(cat <<'EOF'
-Create a Datadog log index with these parameters:
+Invoke the observability:create-log-index skill and execute its golden
+path end-to-end. Do NOT enter brainstorming or planning mode. Do NOT ask
+for design approval — the golden path IS the approved design. Write
+files, run the checks, and hand off to _pr-handoff directly.
+
+Parameters (already confirmed by the operator):
 - team: foobar
 - env: prod
 - filter: service:foobar-api env:prod
@@ -59,8 +64,7 @@ Create a Datadog log index with these parameters:
 - days: 30
 - quota: 1000000
 
-Accept best-practice suggestions as-is. When the PR payload is ready,
-hand off to the _pr-handoff skill.
+Accept best-practice suggestions as-is.
 EOF
 )
 
