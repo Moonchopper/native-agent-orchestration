@@ -21,6 +21,13 @@
 
 5. **Plugin-dir gitlink trap.** `git add fixtures/claude-plugin-observability/` auto-created a submodule gitlink (mode 160000) because the nested `.git/` exists. Fixed via a hide-the-nested-.git-during-add workaround; Task 1's `.gitkeep` in `fixtures/datadog-operations/` had accidentally inoculated that subtree, so the plugin was the only victim. See memory `nested_fixture_repos_gitlink_trap.md`.
 
+6. **LLM non-determinism in scenario runs is a real, observed limitation.** Three runs were attempted during Task 12 end-to-end verification. Run 1 passed cleanly (plugin loaded → skill matched → content loaded → practice checks → draft → handoff → assertions all passed). Run 2 (after a small runner-tightening amend) had Claude enter a brainstorming-style "discuss the design first, then ask for approval" mode, which headless `claude -p` cannot approve. Run 3 (after prompting Claude more directively) had Claude execute the golden path but then claim `_pr-handoff` "isn't registered" and fall back to creating a git commit in the fixture repo instead of writing the handoff JSON. The architecture is proven — one successful full pass exists on record — but repeatability is **not** guaranteed by the current prompt / skill shape. Likely hardening paths for Stage 2:
+   - Strengthen the `create-log-index` SKILL.md Step 9 to name the invocation mechanism explicitly (e.g. `Skill` tool call with name `observability:_pr-handoff`, not a slash-command reference) and to explicitly forbid git-commit / `gh pr create` fallbacks.
+   - Consider renaming `_pr-handoff` to `pr-handoff` (leading underscore may be interpreted as "private/hidden" by some matching heuristics).
+   - Replace `--permission-mode bypassPermissions` with an explicit `--allowedTools` allowlist scoped to what the skill actually exercises; this may also tighten the agent's focus.
+   - Use `--append-system-prompt` to inject a "no brainstorming, scenario run" directive directly into the system prompt.
+   - Stage 2's measurement matrix would amplify variance — multiple runs per scenario would reveal this as a first-class P50/P95 concern, which is the natural time to invest in prompt/skill hardening.
+
 ## What Stage 2 needs from Stage 1
 
 - **Runner is the integration point** for the measurement hook. Stage 2 will set `AGENT_ORCH_SCENARIO` and `AGENT_ORCH_VARIANT` env vars from inside the runner before invoking `claude -p`, and pass `--settings <path>` to configure the metric-capture hook.
