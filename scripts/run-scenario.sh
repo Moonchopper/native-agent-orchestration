@@ -64,10 +64,11 @@ EOF
 # the CWD-detection ladder hits its first branch.
 cd "$FIXTURE_REPO"
 
-# `claude -p` runs non-interactively. Settings override is intentionally
-# left empty for Stage 1; in Stage 2 we'll pass a settings.json with the
-# metric-capture hook configured.
-claude -p "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
+# `claude -p` runs non-interactively. Permission mode `bypassPermissions`
+# is used because the scenario runs inside a fixture repo sandbox and there
+# is no interactive approver; Stage 2 will pass a settings.json with the
+# metric-capture hook and a narrower tool allowlist.
+claude -p --permission-mode bypassPermissions "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
   echo "ERROR: claude invocation failed" >&2
   echo "--- stderr ---" >&2
   cat "$SESSION_DIR/session.err" >&2
