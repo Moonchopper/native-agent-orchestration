@@ -68,6 +68,9 @@ Accept best-practice suggestions as-is.
 EOF
 )
 
+# System-level directive to prevent design-discussion mode.
+BENCH_SYSTEM_PROMPT='You are running inside an automated benchmark harness. Do not enter brainstorming, design-review, or planning modes. Do not ask the operator for approval on design decisions — the skill body IS the approved design. Execute golden paths end-to-end. If a referenced skill or tool is unavailable, halt with a clear error; do not substitute an alternative.'
+
 # Invoke Claude Code headlessly from the fixture repo's working tree so
 # the CWD-detection ladder hits its first branch.
 cd "$FIXTURE_REPO"
@@ -77,7 +80,10 @@ cd "$FIXTURE_REPO"
 # permissions.allow allowlist scoped to the tools create-log-index
 # exercises (git, gh auth, terraform fmt/validate, file ops, Skill).
 # Hook wiring lands in Task B4.
-claude -p --settings "$REPO_ROOT/settings/benchmark.settings.json" "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
+claude -p \
+  --settings "$REPO_ROOT/settings/benchmark.settings.json" \
+  --append-system-prompt "$BENCH_SYSTEM_PROMPT" \
+  "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
   echo "ERROR: claude invocation failed" >&2
   echo "--- stderr ---" >&2
   cat "$SESSION_DIR/session.err" >&2
