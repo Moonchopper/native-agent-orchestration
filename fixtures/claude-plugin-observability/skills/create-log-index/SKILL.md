@@ -148,9 +148,19 @@ Assemble the payload:
 - `pr_body`: fill the PR body template from `steps.md` with the confirmed values
 - `override_rationale`: `overrides[]` collected above
 
-Invoke the `pr-handoff` skill (`/observability:pr-handoff`) with the
-payload. In Stage 1 the handoff skill serializes the payload to a JSON
-file for assertion; it does NOT create a PR.
+Invoke the `pr-handoff` skill by calling the `Skill` tool with:
+- `skill: "observability:pr-handoff"`
+- `args: <the assembled payload, JSON-encoded>`
+
+Do NOT substitute any alternative. Specifically:
+- Do NOT run `git commit` or `gh pr create` from this skill. Those are
+  `pr-handoff`'s job — not yours.
+- Do NOT write the handoff JSON directly with the `Write` tool. The
+  `pr-handoff` skill owns the artifact path and schema.
+- Do NOT ask the user "should I commit this instead?" The answer is no.
+
+If the `Skill` tool reports that `observability:pr-handoff` is not
+available, halt and surface the error verbatim. Do not fall back.
 
 ## Error handling
 
