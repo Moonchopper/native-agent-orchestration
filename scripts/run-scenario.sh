@@ -54,7 +54,7 @@ PROMPT=$(cat <<'EOF'
 Invoke the observability:create-log-index skill and execute its golden
 path end-to-end. Do NOT enter brainstorming or planning mode. Do NOT ask
 for design approval — the golden path IS the approved design. Write
-files, run the checks, and hand off to _pr-handoff directly.
+files, run the checks, and hand off to pr-handoff directly.
 
 Parameters (already confirmed by the operator):
 - team: foobar

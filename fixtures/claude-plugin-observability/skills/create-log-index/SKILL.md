@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 ## Goal
 Help the user open a compliant Terraform PR to `fixture-org/datadog-operations`
 that provisions a Datadog log index. End state: a PR-handoff payload has been
-written via the `_pr-handoff` skill with the drafted file and PR body.
+written via the `pr-handoff` skill with the drafted file and PR body.
 
 ## Execution-model boundary
 You author a PR. You do NOT call the Datadog API directly. You do NOT run
@@ -141,14 +141,14 @@ git diff --no-color terraform/logs/indexes/$team.tf
 Show the diff to the user. Ask: "Approve and prepare the PR payload, or
 iterate further?" Wait for answer.
 
-## Step 9 — Hand off to `_pr-handoff`
+## Step 9 — Hand off to `pr-handoff`
 
 Assemble the payload:
 - `drafted_files`: `[{path: "terraform/logs/indexes/$team.tf", contents: <contents>}]`
 - `pr_body`: fill the PR body template from `steps.md` with the confirmed values
 - `override_rationale`: `overrides[]` collected above
 
-Invoke the `_pr-handoff` skill (`/observability:_pr-handoff`) with the
+Invoke the `pr-handoff` skill (`/observability:pr-handoff`) with the
 payload. In Stage 1 the handoff skill serializes the payload to a JSON
 file for assertion; it does NOT create a PR.
 
