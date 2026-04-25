@@ -1,0 +1,10 @@
+{"scenario":"create-log-index","variant":"local-hit","run_ix":1,"turn":1,"tokens_in":1000,"tokens_out":200,"cache_read":800,"cache_creation":0,"duration_ms":1500}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":1,"turn":2,"tokens_in":2000,"tokens_out":300,"cache_read":1600,"cache_creation":0,"duration_ms":2000}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":2,"turn":1,"tokens_in":1100,"tokens_out":210,"cache_read":850,"cache_creation":0,"duration_ms":1600}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":2,"turn":2,"tokens_in":2100,"tokens_out":310,"cache_read":1650,"cache_creation":0,"duration_ms":2100}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":3,"turn":1,"tokens_in":1200,"tokens_out":220,"cache_read":900,"cache_creation":0,"duration_ms":1700}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":3,"turn":2,"tokens_in":2200,"tokens_out":320,"cache_read":1700,"cache_creation":0,"duration_ms":2200}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":4,"turn":1,"tokens_in":1300,"tokens_out":230,"cache_read":950,"cache_creation":0,"duration_ms":1800}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":4,"turn":2,"tokens_in":2300,"tokens_out":330,"cache_read":1750,"cache_creation":0,"duration_ms":2300}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":5,"turn":1,"tokens_in":1400,"tokens_out":240,"cache_read":1000,"cache_creation":0,"duration_ms":1900}
+{"scenario":"create-log-index","variant":"local-hit","run_ix":5,"turn":2,"tokens_in":2400,"tokens_out":340,"cache_read":1800,"cache_creation":0,"duration_ms":2400}
