@@ -1,7 +1,7 @@
 ---
 name: create-log-index
 description: Use when a user wants to create or provision a Datadog log index — e.g. for retention beyond the 15-minute Live Tail, for routing logs to a dedicated index, or for cost-aware log scoping. Trigger phrases include "create log index", "retain logs for longer than 15 minutes", "make a Datadog index", "provision a log index".
-allowed-tools: Bash, Read, Glob, Grep, Edit, Write
+allowed-tools: Bash, Read, Glob, Grep, Edit, Write, Skill
 ---
 
 # Create Datadog Log Index
@@ -150,7 +150,11 @@ Assemble the payload:
 
 Invoke the `pr-handoff` skill by calling the `Skill` tool with:
 - `skill: "observability:pr-handoff"`
-- `args: <the assembled payload, JSON-encoded>`
+- `args: <a JSON object string containing the three payload keys, NOT a JSON-encoded string of a JSON string>`
+
+For example, `args` should be the literal text:
+`{"drafted_files": [{"path": "...", "contents": "..."}], "pr_body": "...", "override_rationale": [...]}`
+— not the same content wrapped in another layer of quoting/escaping.
 
 Do NOT substitute any alternative. Specifically:
 - Do NOT run `git commit` or `gh pr create` from this skill. Those are
@@ -159,8 +163,10 @@ Do NOT substitute any alternative. Specifically:
   `pr-handoff` skill owns the artifact path and schema.
 - Do NOT ask the user "should I commit this instead?" The answer is no.
 
-If the `Skill` tool reports that `observability:pr-handoff` is not
-available, halt and surface the error verbatim. Do not fall back.
+If the `Skill` tool returns ANY error — "not available", "failed", a
+non-success status from inside `pr-handoff`, or anything else — halt
+and surface the error verbatim. Do not fall back, do not retry with a
+different tool, and do not invent a workaround.
 
 ## Error handling
 
