@@ -331,6 +331,117 @@ weight. Addresses stage-1 run 2 mode-confusion."
 
 ---
 
+### Task A4.5: Fix local-plugin enrollment (added mid-execution)
+
+**Why this task exists (plan deviation):** A4's stricter system prompt ("If a referenced skill or tool is unavailable, halt") surfaced a Stage-1-era latent bug: the fixture plugin is not actually loaded by `claude -p`. The previous `scripts/setup-plugin.sh` did `cp -R fixtures/claude-plugin-observability ~/.claude/plugins/observability-fixture/` — but Claude Code does not auto-discover plugins from arbitrary directories. It loads only plugins enrolled in `~/.claude/plugins/installed_plugins.json` (or in a project's `.claude/settings.json`), with `installPath` typically under `~/.claude/plugins/cache/<marketplace>/<name>/<version>/`. The result: A3's "successful" smoke run was actually the agent improvising — `cd`'d into the fixture repo, it read `agent/golden-paths/create-log-index/steps.md` directly off disk and followed the prose, never invoking the plugin. The assertion script (which checks artifacts, not invocation path) couldn't tell the difference. Stage 1's "one successful end-to-end run on record" was very likely the same improvisation. **Until this is fixed, the entire architecture validation is compromised** — Stage 2's measurement matrix would benchmark improvisation cost, not architecture cost.
+
+**Canonical fix (per Claude Code docs):** Add a project-root local marketplace and use `claude plugin marketplace add` + `claude plugin install` with `--scope project`.
+
+**Files:**
+- Create: `.claude-plugin/marketplace.json` at project root (committed to repo).
+- Rewrite: `scripts/setup-plugin.sh` to use the marketplace + install commands instead of `cp -R`.
+- Possibly create or modify: `.claude/settings.json` at project root (the `--scope project` flag writes here; if so, decide whether to commit or gitignore).
+
+- [ ] **Step 1: Create the marketplace file**
+
+`/.claude-plugin/marketplace.json` (project root, NOT inside the fixture):
+
+```json
+{
+  "name": "native-agent-observability-local",
+  "owner": { "name": "native-agent-orchestration" },
+  "plugins": [
+    {
+      "name": "observability",
+      "source": "./fixtures/claude-plugin-observability",
+      "description": "PoC fixture plugin: skills for Datadog observability golden paths"
+    }
+  ]
+}
+```
+
+The `source` path is relative to the marketplace root (project root). Marketplace name is arbitrary but must be unique on the user's machine.
+
+- [ ] **Step 2: Rewrite `scripts/setup-plugin.sh`**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Enroll the fixture plugin via the project-local marketplace at .claude-plugin/.
+# Idempotent: re-running adds nothing if the marketplace is already registered
+# and the plugin is already installed.
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MARKETPLACE_DIR="$REPO_ROOT/.claude-plugin"
+MARKETPLACE_NAME="native-agent-observability-local"
+PLUGIN_NAME="observability"
+
+[ -f "$MARKETPLACE_DIR/marketplace.json" ] || {
+  echo "ERROR: marketplace file not found at $MARKETPLACE_DIR/marketplace.json" >&2
+  exit 1
+}
+
+claude plugin marketplace add "$MARKETPLACE_DIR" --scope project
+claude plugin install "$PLUGIN_NAME@$MARKETPLACE_NAME" --scope project
+
+echo "Installed fixture plugin '$PLUGIN_NAME' from local marketplace '$MARKETPLACE_NAME'"
+echo "Verify: claude plugin list"
+```
+
+If either `claude plugin marketplace add` or `claude plugin install` is non-idempotent (errors when already-registered/installed), wrap each call in an idempotency check (e.g., `claude plugin list | grep -q ...` first, or `... || true` if errors are benign duplicates).
+
+- [ ] **Step 3: Run setup-plugin.sh and verify**
+
+```bash
+./scripts/setup-plugin.sh
+claude plugin list
+```
+
+Expected: `claude plugin list` shows `observability@native-agent-observability-local` enabled. If it doesn't, inspect the project's `.claude/settings.json` (which `--scope project` writes to) and the user's `~/.claude/plugins/installed_plugins.json` to see what landed where.
+
+- [ ] **Step 4: Decide on `.claude/settings.json` git-tracking**
+
+If `--scope project` created `.claude/settings.json` in the worktree, decide:
+- **Commit it** — if its content is just the marketplace + plugin enrollment (no user secrets, no machine-specific paths). This makes the plugin auto-load for any developer who clones the repo and runs `setup-plugin.sh` (they only need to run setup once).
+- **Gitignore it** — if it picked up local paths or settings that shouldn't be shared.
+
+Inspect `cat .claude/settings.json` and choose. Add to `.gitignore` if needed; otherwise add to commit.
+
+- [ ] **Step 5: Smoke-run the scenario**
+
+```bash
+./scripts/run-scenario.sh create-log-index local-hit
+```
+
+Expected: scenario passes WITHOUT the agent improvising. Verify by inspecting the session output:
+
+```bash
+# The session dir is printed by the runner; look at session.out
+cat <session_dir>/session.out
+```
+
+Expected language in the output: explicit reference to invoking the `observability:create-log-index` skill (NOT just "I read steps.md and followed it"). If the agent says anything like "the skill isn't available, but I followed the golden path content directly," that's still improvisation — STOP and report BLOCKED.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .claude-plugin/marketplace.json scripts/setup-plugin.sh
+# Optionally: git add .claude/settings.json    (if Step 4 chose to commit)
+# OR:        git add .gitignore                (if Step 4 chose to gitignore)
+git commit -m "fix: enroll fixture plugin via local marketplace
+
+A3's smoke and Stage-1's '1/3 pass' were both improvisation, not
+plugin-driven discovery. Claude Code only loads plugins registered
+via marketplace + install commands; cp -R into ~/.claude/plugins/
+is not enough. Add a project-root marketplace.json and rewrite
+setup-plugin.sh to use claude plugin marketplace add + install."
+```
+
+**Risk to flag for Task D2 (stage-2-notes):** The original Stage-1 "validation" was on a false premise. The architecture's plugin-driven discovery has never been end-to-end-verified in this repo until Task A4.5 lands. This raises the priority of A5's stability run as the FIRST true validation.
+
+---
+
 ### Task A5: Stability verification — 5 consecutive runs
 
 **Why:** A1–A4 are each individually cheap, but the *combined* claim — "hardening fixed the non-determinism" — is only answerable by running the scenario multiple times and counting failures. This is the Part-A exit criterion.
