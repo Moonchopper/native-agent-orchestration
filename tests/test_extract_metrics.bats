@@ -23,12 +23,8 @@ teardown() {
 
 @test "extract-metrics tags each line with scenario/variant/run_ix from env" {
   "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
-  while IFS= read -r line; do
-    [ "$line" = "create-log-index" ] || return 1
-  done < <(jq -r '.scenario' "$METRICS_FILE")
-  while IFS= read -r line; do
-    [ "$line" = "3" ] || return 1
-  done < <(jq -r '.run_ix' "$METRICS_FILE")
+  ALL_TAGGED=$(jq -s 'all(.scenario == "create-log-index" and .variant == "local-hit" and .run_ix == 3)' "$METRICS_FILE")
+  [ "$ALL_TAGGED" = "true" ]
 }
 
 @test "extract-metrics carries token fields verbatim from .message.usage" {
@@ -40,11 +36,11 @@ teardown() {
 
 @test "extract-metrics turn field is 1-indexed and monotonically increasing" {
   "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
-  PREV=0
-  while IFS= read -r t; do
-    [ "$t" -gt "$PREV" ] || return 1
-    PREV="$t"
-  done < <(jq -r '.turn' "$METRICS_FILE")
+  # First turn is 1 and each subsequent turn is exactly previous + 1.
+  FIRST=$(jq -s '.[0].turn' "$METRICS_FILE")
+  [ "$FIRST" = "1" ]
+  STRICTLY_INC=$(jq -s '[.[].turn] as $turns | all(range(1; $turns|length); $turns[.] == $turns[.-1] + 1)' "$METRICS_FILE")
+  [ "$STRICTLY_INC" = "true" ]
 }
 
 @test "extract-metrics writes to stdout when AGENT_ORCH_METRICS_FILE is unset" {
