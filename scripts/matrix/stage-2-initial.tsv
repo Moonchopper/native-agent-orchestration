@@ -1,0 +1,2 @@
+scenario	variant	n
+create-log-index	local-hit	5

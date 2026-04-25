@@ -1,5 +1,5 @@
 ---
-name: _pr-handoff
+name: pr-handoff
 description: STUB. Receives a PR-authoring payload from a golden-path skill and writes it to a known path for Stage 1 assertions. This is NOT a real PR-authoring implementation; see the spec's execution-model boundary — real PR creation is out of scope for Stage 1.
 allowed-tools: Write
 ---

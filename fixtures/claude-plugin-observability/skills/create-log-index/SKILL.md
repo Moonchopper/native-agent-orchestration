@@ -1,7 +1,7 @@
 ---
 name: create-log-index
 description: Use when a user wants to create or provision a Datadog log index — e.g. for retention beyond the 15-minute Live Tail, for routing logs to a dedicated index, or for cost-aware log scoping. Trigger phrases include "create log index", "retain logs for longer than 15 minutes", "make a Datadog index", "provision a log index".
-allowed-tools: Bash, Read, Glob, Grep, Edit, Write
+allowed-tools: Bash, Read, Glob, Grep, Edit, Write, Skill
 ---
 
 # Create Datadog Log Index
@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 ## Goal
 Help the user open a compliant Terraform PR to `fixture-org/datadog-operations`
 that provisions a Datadog log index. End state: a PR-handoff payload has been
-written via the `_pr-handoff` skill with the drafted file and PR body.
+written via the `pr-handoff` skill with the drafted file and PR body.
 
 ## Execution-model boundary
 You author a PR. You do NOT call the Datadog API directly. You do NOT run
@@ -141,16 +141,32 @@ git diff --no-color terraform/logs/indexes/$team.tf
 Show the diff to the user. Ask: "Approve and prepare the PR payload, or
 iterate further?" Wait for answer.
 
-## Step 9 — Hand off to `_pr-handoff`
+## Step 9 — Hand off to `pr-handoff`
 
 Assemble the payload:
 - `drafted_files`: `[{path: "terraform/logs/indexes/$team.tf", contents: <contents>}]`
 - `pr_body`: fill the PR body template from `steps.md` with the confirmed values
 - `override_rationale`: `overrides[]` collected above
 
-Invoke the `_pr-handoff` skill (`/observability:_pr-handoff`) with the
-payload. In Stage 1 the handoff skill serializes the payload to a JSON
-file for assertion; it does NOT create a PR.
+Invoke the `pr-handoff` skill by calling the `Skill` tool with:
+- `skill: "observability:pr-handoff"`
+- `args: <a JSON object string containing the three payload keys, NOT a JSON-encoded string of a JSON string>`
+
+For example, `args` should be the literal text:
+`{"drafted_files": [{"path": "...", "contents": "..."}], "pr_body": "...", "override_rationale": [...]}`
+— not the same content wrapped in another layer of quoting/escaping.
+
+Do NOT substitute any alternative. Specifically:
+- Do NOT run `git commit` or `gh pr create` from this skill. Those are
+  `pr-handoff`'s job — not yours.
+- Do NOT write the handoff JSON directly with the `Write` tool. The
+  `pr-handoff` skill owns the artifact path and schema.
+- Do NOT ask the user "should I commit this instead?" The answer is no.
+
+If the `Skill` tool returns ANY error — "not available", "failed", a
+non-success status from inside `pr-handoff`, or anything else — halt
+and surface the error verbatim. Do not fall back, do not retry with a
+different tool, and do not invent a workaround.
 
 ## Error handling
 

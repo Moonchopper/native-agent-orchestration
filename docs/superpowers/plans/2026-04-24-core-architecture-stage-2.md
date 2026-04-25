@@ -331,6 +331,117 @@ weight. Addresses stage-1 run 2 mode-confusion."
 
 ---
 
+### Task A4.5: Fix local-plugin enrollment (added mid-execution)
+
+**Why this task exists (plan deviation):** A4's stricter system prompt ("If a referenced skill or tool is unavailable, halt") surfaced a Stage-1-era latent bug: the fixture plugin is not actually loaded by `claude -p`. The previous `scripts/setup-plugin.sh` did `cp -R fixtures/claude-plugin-observability ~/.claude/plugins/observability-fixture/` — but Claude Code does not auto-discover plugins from arbitrary directories. It loads only plugins enrolled in `~/.claude/plugins/installed_plugins.json` (or in a project's `.claude/settings.json`), with `installPath` typically under `~/.claude/plugins/cache/<marketplace>/<name>/<version>/`. The result: A3's "successful" smoke run was actually the agent improvising — `cd`'d into the fixture repo, it read `agent/golden-paths/create-log-index/steps.md` directly off disk and followed the prose, never invoking the plugin. The assertion script (which checks artifacts, not invocation path) couldn't tell the difference. Stage 1's "one successful end-to-end run on record" was very likely the same improvisation. **Until this is fixed, the entire architecture validation is compromised** — Stage 2's measurement matrix would benchmark improvisation cost, not architecture cost.
+
+**Canonical fix (per Claude Code docs):** Add a project-root local marketplace and use `claude plugin marketplace add` + `claude plugin install` with `--scope project`.
+
+**Files:**
+- Create: `.claude-plugin/marketplace.json` at project root (committed to repo).
+- Rewrite: `scripts/setup-plugin.sh` to use the marketplace + install commands instead of `cp -R`.
+- Possibly create or modify: `.claude/settings.json` at project root (the `--scope project` flag writes here; if so, decide whether to commit or gitignore).
+
+- [ ] **Step 1: Create the marketplace file**
+
+`/.claude-plugin/marketplace.json` (project root, NOT inside the fixture):
+
+```json
+{
+  "name": "native-agent-observability-local",
+  "owner": { "name": "native-agent-orchestration" },
+  "plugins": [
+    {
+      "name": "observability",
+      "source": "./fixtures/claude-plugin-observability",
+      "description": "PoC fixture plugin: skills for Datadog observability golden paths"
+    }
+  ]
+}
+```
+
+The `source` path is relative to the marketplace root (project root). Marketplace name is arbitrary but must be unique on the user's machine.
+
+- [ ] **Step 2: Rewrite `scripts/setup-plugin.sh`**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Enroll the fixture plugin via the project-local marketplace at .claude-plugin/.
+# Idempotent: re-running adds nothing if the marketplace is already registered
+# and the plugin is already installed.
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MARKETPLACE_DIR="$REPO_ROOT/.claude-plugin"
+MARKETPLACE_NAME="native-agent-observability-local"
+PLUGIN_NAME="observability"
+
+[ -f "$MARKETPLACE_DIR/marketplace.json" ] || {
+  echo "ERROR: marketplace file not found at $MARKETPLACE_DIR/marketplace.json" >&2
+  exit 1
+}
+
+claude plugin marketplace add "$MARKETPLACE_DIR" --scope project
+claude plugin install "$PLUGIN_NAME@$MARKETPLACE_NAME" --scope project
+
+echo "Installed fixture plugin '$PLUGIN_NAME' from local marketplace '$MARKETPLACE_NAME'"
+echo "Verify: claude plugin list"
+```
+
+If either `claude plugin marketplace add` or `claude plugin install` is non-idempotent (errors when already-registered/installed), wrap each call in an idempotency check (e.g., `claude plugin list | grep -q ...` first, or `... || true` if errors are benign duplicates).
+
+- [ ] **Step 3: Run setup-plugin.sh and verify**
+
+```bash
+./scripts/setup-plugin.sh
+claude plugin list
+```
+
+Expected: `claude plugin list` shows `observability@native-agent-observability-local` enabled. If it doesn't, inspect the project's `.claude/settings.json` (which `--scope project` writes to) and the user's `~/.claude/plugins/installed_plugins.json` to see what landed where.
+
+- [ ] **Step 4: Decide on `.claude/settings.json` git-tracking**
+
+If `--scope project` created `.claude/settings.json` in the worktree, decide:
+- **Commit it** — if its content is just the marketplace + plugin enrollment (no user secrets, no machine-specific paths). This makes the plugin auto-load for any developer who clones the repo and runs `setup-plugin.sh` (they only need to run setup once).
+- **Gitignore it** — if it picked up local paths or settings that shouldn't be shared.
+
+Inspect `cat .claude/settings.json` and choose. Add to `.gitignore` if needed; otherwise add to commit.
+
+- [ ] **Step 5: Smoke-run the scenario**
+
+```bash
+./scripts/run-scenario.sh create-log-index local-hit
+```
+
+Expected: scenario passes WITHOUT the agent improvising. Verify by inspecting the session output:
+
+```bash
+# The session dir is printed by the runner; look at session.out
+cat <session_dir>/session.out
+```
+
+Expected language in the output: explicit reference to invoking the `observability:create-log-index` skill (NOT just "I read steps.md and followed it"). If the agent says anything like "the skill isn't available, but I followed the golden path content directly," that's still improvisation — STOP and report BLOCKED.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .claude-plugin/marketplace.json scripts/setup-plugin.sh
+# Optionally: git add .claude/settings.json    (if Step 4 chose to commit)
+# OR:        git add .gitignore                (if Step 4 chose to gitignore)
+git commit -m "fix: enroll fixture plugin via local marketplace
+
+A3's smoke and Stage-1's '1/3 pass' were both improvisation, not
+plugin-driven discovery. Claude Code only loads plugins registered
+via marketplace + install commands; cp -R into ~/.claude/plugins/
+is not enough. Add a project-root marketplace.json and rewrite
+setup-plugin.sh to use claude plugin marketplace add + install."
+```
+
+**Risk to flag for Task D2 (stage-2-notes):** The original Stage-1 "validation" was on a false premise. The architecture's plugin-driven discovery has never been end-to-end-verified in this repo until Task A4.5 lands. This raises the priority of A5's stability run as the FIRST true validation.
+
+---
+
 ### Task A5: Stability verification — 5 consecutive runs
 
 **Why:** A1–A4 are each individually cheap, but the *combined* claim — "hardening fixed the non-determinism" — is only answerable by running the scenario multiple times and counting failures. This is the Part-A exit criterion.
@@ -372,73 +483,89 @@ No commit for this task (no file changes). Just capture the pass rate for the St
 
 ---
 
-# Part B — Metric-capture hook
+# Part B — Transcript-derived metric capture (rewritten 2026-04-25)
 
-### Task B1: Confirm the Claude Code hook event
+**Why this part is different from the original plan:** Task B1's payload-capture step revealed that `claude -p`'s `Stop` hook payload does NOT carry token-usage data. It carries `{session_id, transcript_path, cwd, permission_mode, hook_event_name, stop_hook_active, last_assistant_message}` — and that's it. All token data lives in the session transcript JSONL at `transcript_path` under `.message.usage.{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}` and `.message.model`, with one transcript line per assistant LLM call (~75 per scenario run in our case).
 
-**Why:** Spec §15 flagged `Stop` as the candidate. `Stop` fires once per user-turn completion, which is per-turn cadence. But per-turn *token metadata* may land in a different event (e.g., `PostToolUse`, `SessionEnd`). We need to confirm the event that actually carries `tokens_in`, `tokens_out`, `cache_read`, `cache_creation`, and `duration_ms` before implementing the hook body.
+We **drop the hook layer entirely** in favor of runner post-processing. After `claude -p` exits, the runner finds the transcript by session_id (printed in the runner's session.out) or by mtime, runs `jq` over it, and emits the per-run JSONL summary directly. This eliminates ~3 tasks of work and removes the risk of hook-payload-shape drift across Claude Code versions. Spec §11 is descriptive of intent; the analysis dimensions in §11.6 work identically with this mechanism.
 
-**Files:** none yet — research task. Output is a written decision recorded inline in the next task's hook file.
+The original B1–B5 task list collapses into:
+- **B1** — record the captured-payload finding + the transcript schema as a decision note. (No code; this becomes input to B2/B3 and to D2's stage-2-notes.)
+- **B2** — failing bats test for the new `scripts/extract-metrics.sh` (transcript → JSONL).
+- **B3** — implement `extract-metrics.sh`.
+- **B4** — wire the runner to invoke `extract-metrics.sh` after `claude -p` exits, with env-var tagging + per-run output paths.
 
-- [ ] **Step 1: Query the Claude Code hook reference**
+The metric-capture HOOK is no longer needed; `settings/benchmark.settings.json` `"hooks": {}` stays empty. The plugin enrollment block in that file (added in A4.5) stays.
 
-Dispatch the `claude-code-guide` agent (or consult the Claude Code docs directly) with:
+### Task B1: Decision note — drop the hook; use transcript post-processing
 
-> "I need to write a Claude Code hook that captures per-turn token usage. Specifically: tokens_in, tokens_out, cache_read, cache_creation, duration_ms, and the currently active skill name. Which hook event delivers this data in its payload? Prefer events that fire once per turn without firing per-tool-call. Confirm the JSON path to each field in the hook stdin payload."
+**Files:** none (decision recorded inline in the new B3 file's header comment, and surfaced for D2).
 
-- [ ] **Step 2: Record the decision**
+- [ ] **Step 1: Record the decision (already made; no work needed beyond capturing it).**
 
-Write a one-paragraph decision note at the top of `hooks/metric-capture.sh` (the file you'll create in Task B3). Include:
-- The hook event name (e.g., `Stop`, `PostToolUse`).
-- Why that event was chosen over alternatives.
-- The JSON path to each token field (`.response.usage.input_tokens`, etc.).
-- Any gotchas (e.g., "`cache_read` is 0 on uncached turns rather than absent").
+The B3 implementation file (`scripts/extract-metrics.sh`) will carry the decision note at the top, including:
+- Why we dropped the hook (Stop payload carries no token data on the current `claude -p` version; tested on the worktree's smoke runs 2026-04-25)
+- Schema observed in the actual Stop payload
+- Schema observed in the transcript JSONL: `.message.usage.{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens}`, `.message.model`, plus the per-line UUID and `.timestamp`
+- Where the transcript lives: `~/.claude/projects/<project-slug>/<session-id>.jsonl` where the project-slug is derived from the runner's CWD at `claude -p` invocation time (with `\` and `:` and `/` munged into `--`).
 
-- [ ] **Step 3: Capture a real payload for the fixture**
+- [ ] **Step 2: Capture the transcript fixture for B2.**
 
-Temporarily wire a stub hook that writes `$INPUT` to a file, run one scenario invocation, then inspect the captured payload:
-
-```bash
-cat > /tmp/hook-capture.sh <<'EOF'
-#!/usr/bin/env bash
-cat > "/tmp/hook-payload-$(date +%s%N).json"
-EOF
-chmod +x /tmp/hook-capture.sh
-```
-
-Add a temporary hook entry to `settings/benchmark.settings.json` pointing at `/tmp/hook-capture.sh` for the event chosen in Step 1, run the scenario once, then `cat /tmp/hook-payload-*.json | jq .` to inspect. Pick one representative payload and save it as `tests/fixtures/metric-hook-payload.json`.
-
-- [ ] **Step 4: Revert the temporary hook wiring and verify**
+The runner already produced 5 transcripts during A5 plus another from B1's payload-capture run. Pick one representative transcript from `~/.claude/projects/D--git-native-agent-orchestration--worktrees-stage-2-measurement-harness-fixtures-datadog-operations/` and copy it to `tests/fixtures/transcript-sample.jsonl`. Truncate to ~10 representative lines if the file is huge (preserve at least 3 assistant `.message.usage` lines and a Skill tool-use line, so B2 can assert against multiple turns).
 
 ```bash
-git diff settings/benchmark.settings.json
+cd d:/git/native-agent-orchestration/.worktrees/stage-2-measurement-harness
+PROJECT_SLUG=D--git-native-agent-orchestration--worktrees-stage-2-measurement-harness-fixtures-datadog-operations
+SAMPLE_TRANSCRIPT=$(ls -t /c/Users/austi/.claude/projects/$PROJECT_SLUG/*.jsonl | head -1)
+mkdir -p tests/fixtures
+cp "$SAMPLE_TRANSCRIPT" tests/fixtures/transcript-sample.jsonl
+# (Optional) truncate to a workable size while preserving usage lines and a Skill line.
 ```
 
-Expected: no diff (or only the already-intended A3/B4 edits — no `/tmp/hook-capture.sh` reference). If the temp entry is still there, remove it now. Verifying via `git diff` rather than relying on manual revert prevents the "forgot to undo the stub" bug.
-
-(No commit yet — this task's output is the recorded decision and the saved fixture, both consumed by B2/B3.)
+(No commit yet — the fixture lands in B2's commit alongside the failing test.)
 
 ---
 
-### Task B2: Write failing test for `hooks/metric-capture.sh`
+### Task B2: Failing bats test for `scripts/extract-metrics.sh`
 
 **Files:**
-- Create: `tests/test_metric_hook.bats`
-- Use: `tests/fixtures/metric-hook-payload.json` (from B1), and a second fixture you'll create below
+- Create: `tests/fixtures/transcript-sample.jsonl` (from B1 Step 2)
+- Create: `tests/test_extract_metrics.bats`
 
-- [ ] **Step 1: Create the second fixture (missing-tokens payload)**
+**Contract under test:**
+- Script signature: `extract-metrics.sh <transcript.jsonl>`
+- Reads stdin or arg? Use **arg**: simpler, idempotent, matches `aggregate-metrics.sh`'s pattern in Part C.
+- Honors env vars: `AGENT_ORCH_SCENARIO`, `AGENT_ORCH_VARIANT`, `AGENT_ORCH_RUN_IX`, `AGENT_ORCH_METRICS_FILE`. If `AGENT_ORCH_METRICS_FILE` is set, append JSONL there; otherwise write to stdout.
+- Output: one JSONL line per assistant `.message.usage` entry in the transcript, with the schema:
 
-Copy `tests/fixtures/metric-hook-payload.json` to `tests/fixtures/metric-hook-payload-missing-tokens.json` and zero-out or null-out the usage fields. This drives the hook's graceful-degradation path.
+```json
+{
+  "ts": "<message timestamp from .timestamp>",
+  "session_id": "<derived from filename or .sessionId>",
+  "scenario": "<from env>",
+  "variant": "<from env>",
+  "run_ix": <from env>,
+  "turn": <1-based index of this assistant message within the transcript>,
+  "model": "<from .message.model>",
+  "tokens_in": <from .message.usage.input_tokens>,
+  "tokens_out": <from .message.usage.output_tokens>,
+  "cache_read": <from .message.usage.cache_read_input_tokens>,
+  "cache_creation": <from .message.usage.cache_creation_input_tokens>,
+  "duration_ms": 0,
+  "skill_active": null
+}
+```
 
-- [ ] **Step 2: Write the bats test**
+`duration_ms` and `skill_active` are emitted as 0 / null. `duration_ms` is not in the transcript schema; `skill_active` requires deriving from the `Skill` tool-use entries — deferred to a Stage-3 enhancement and recorded in stage-2-notes carry-forward risks.
 
-Create `tests/test_metric_hook.bats`:
+- [ ] **Step 1: Write the bats test**
 
 ```bash
 #!/usr/bin/env bats
 
 setup() {
   REPO_ROOT="$(git rev-parse --show-toplevel)"
+  FIXTURE="$REPO_ROOT/tests/fixtures/transcript-sample.jsonl"
   METRICS_FILE="$(mktemp)"
   export AGENT_ORCH_METRICS_FILE="$METRICS_FILE"
   export AGENT_ORCH_SCENARIO="create-log-index"
@@ -450,211 +577,180 @@ teardown() {
   rm -f "$METRICS_FILE"
 }
 
-@test "hook appends one JSONL line with token fields from a valid payload" {
-  "$REPO_ROOT/hooks/metric-capture.sh" < "$REPO_ROOT/tests/fixtures/metric-hook-payload.json"
-  run wc -l < "$METRICS_FILE"
-  [ "$status" -eq 0 ]
-  [ "$output" = "1" ]
+@test "extract-metrics emits one JSONL line per assistant usage entry" {
+  USAGE_COUNT=$(jq -s 'map(select(.message.usage)) | length' "$FIXTURE")
+  "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
+  LINE_COUNT=$(wc -l < "$METRICS_FILE")
+  [ "$LINE_COUNT" = "$USAGE_COUNT" ]
+}
+
+@test "extract-metrics tags each line with scenario/variant/run_ix from env" {
+  "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
   run jq -r '.scenario' "$METRICS_FILE"
-  [ "$output" = "create-log-index" ]
-  run jq -r '.variant' "$METRICS_FILE"
-  [ "$output" = "local-hit" ]
+  for line in $output; do [ "$line" = "create-log-index" ]; done
   run jq -r '.run_ix' "$METRICS_FILE"
-  [ "$output" = "3" ]
-  run jq -r '.tokens_in' "$METRICS_FILE"
-  [ "$output" != "null" ]
-  [ "$output" != "" ]
+  for line in $output; do [ "$line" = "3" ]; done
 }
 
-@test "hook tolerates missing token fields without erroring" {
-  run "$REPO_ROOT/hooks/metric-capture.sh" < "$REPO_ROOT/tests/fixtures/metric-hook-payload-missing-tokens.json"
+@test "extract-metrics carries token fields verbatim from .message.usage" {
+  "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
+  EXPECTED_FIRST_IN=$(jq -s 'map(select(.message.usage)) | .[0].message.usage.input_tokens' "$FIXTURE")
+  ACTUAL_FIRST_IN=$(jq -s '.[0].tokens_in' "$METRICS_FILE")
+  [ "$EXPECTED_FIRST_IN" = "$ACTUAL_FIRST_IN" ]
+}
+
+@test "extract-metrics turn field is 1-indexed and monotonically increasing" {
+  "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
+  TURNS=$(jq -r '.turn' "$METRICS_FILE")
+  PREV=0
+  for t in $TURNS; do
+    [ "$t" -gt "$PREV" ]
+    PREV="$t"
+  done
+}
+
+@test "extract-metrics writes to stdout when AGENT_ORCH_METRICS_FILE is unset" {
+  unset AGENT_ORCH_METRICS_FILE
+  run "$REPO_ROOT/scripts/extract-metrics.sh" "$FIXTURE"
   [ "$status" -eq 0 ]
-  run jq -r '.tokens_in' "$METRICS_FILE"
-  [ "$output" = "0" ] || [ "$output" = "null" ]
+  [ -n "$output" ]
 }
 
-@test "hook appends; does not overwrite" {
-  "$REPO_ROOT/hooks/metric-capture.sh" < "$REPO_ROOT/tests/fixtures/metric-hook-payload.json"
-  "$REPO_ROOT/hooks/metric-capture.sh" < "$REPO_ROOT/tests/fixtures/metric-hook-payload.json"
-  run wc -l < "$METRICS_FILE"
-  [ "$output" = "2" ]
+@test "extract-metrics fails on missing transcript file" {
+  run "$REPO_ROOT/scripts/extract-metrics.sh" "/nonexistent/path.jsonl"
+  [ "$status" -ne 0 ]
 }
 ```
 
-- [ ] **Step 3: Run the test and confirm it fails**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 ```bash
-.bats/bin/bats tests/test_metric_hook.bats
+.bats/bin/bats tests/test_extract_metrics.bats
 ```
 
-Expected: 3 failures, all with "hooks/metric-capture.sh: No such file or directory" or similar. If any test *passes*, something is wrong — investigate before proceeding.
+Expected: 6 failures, all "extract-metrics.sh: No such file or directory" or similar.
 
-- [ ] **Step 4: Commit the failing test**
+- [ ] **Step 3: Commit the failing test**
 
 ```bash
-git add tests/test_metric_hook.bats tests/fixtures/metric-hook-payload*.json
-git commit -m "test: failing bats for metric-capture hook
+git add tests/test_extract_metrics.bats tests/fixtures/transcript-sample.jsonl
+git commit -m "test: failing bats for extract-metrics
 
-Fixtures captured from a real claude -p run (see B1 decision note);
-hook implementation follows in next commit."
+Fixture is a real transcript captured during the A5 stability run
+(2026-04-25). Schema is .message.usage.{input_tokens, output_tokens,
+cache_read_input_tokens, cache_creation_input_tokens} per assistant
+LLM call. Implementation lands in next commit."
 ```
 
 ---
 
-### Task B3: Implement `hooks/metric-capture.sh`
+### Task B3: Implement `scripts/extract-metrics.sh`
 
 **Files:**
-- Create: `hooks/metric-capture.sh`
+- Create: `scripts/extract-metrics.sh`
 
-- [ ] **Step 1: Create the file with the decision note from B1 at the top**
-
-Minimal implementation (adjust the `jq` paths to match the event you confirmed in B1):
+- [ ] **Step 1: Implement**
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Hook: metric-capture
+# extract-metrics.sh — read a Claude Code session transcript (JSONL)
+# and emit one JSONL summary line per assistant LLM call, tagged with
+# scenario / variant / run_ix from the environment.
 #
-# Event: <fill in from B1>
-# Why this event: <fill in from B1>
-# Payload fields consumed (jq paths):
-#   - tokens_in:       .<path>
-#   - tokens_out:      .<path>
-#   - cache_read:      .<path>
-#   - cache_creation:  .<path>
-#   - duration_ms:     .<path>
-#   - session_id:      .<path>
-#   - turn_index:      .<path>
-#   - skill_active:    .<path> (may be absent on turns with no active skill)
-#
-# Output: one JSONL line appended to $AGENT_ORCH_METRICS_FILE (or a derived
-# default). Fields not present in the payload are emitted as 0 or null as
-# appropriate; the hook must never fail a turn just because a field is missing.
+# Why this isn't a Stop hook (recorded 2026-04-25):
+# The Stop hook payload from `claude -p` carries no token-usage data —
+# only {session_id, transcript_path, cwd, permission_mode, hook_event_name,
+# stop_hook_active, last_assistant_message}. Token data lives in the
+# transcript JSONL at .message.usage.{input_tokens, output_tokens,
+# cache_read_input_tokens, cache_creation_input_tokens} and .message.model.
+# Reading the transcript post-`claude -p` is simpler and equivalent for
+# the spec §11.6 analysis dimensions.
 
-PAYLOAD="$(cat)"
+usage() {
+  echo "usage: extract-metrics.sh <transcript.jsonl>" >&2
+  echo "  Env vars (optional):" >&2
+  echo "    AGENT_ORCH_SCENARIO  default: untagged" >&2
+  echo "    AGENT_ORCH_VARIANT   default: untagged" >&2
+  echo "    AGENT_ORCH_RUN_IX    default: 0" >&2
+  echo "    AGENT_ORCH_METRICS_FILE  if set, append JSONL here; else write to stdout" >&2
+  exit 2
+}
+
+[ "$#" -eq 1 ] || usage
+TRANSCRIPT="$1"
+[ -f "$TRANSCRIPT" ] || { echo "ERROR: transcript not found: $TRANSCRIPT" >&2; exit 1; }
 
 SCENARIO="${AGENT_ORCH_SCENARIO:-untagged}"
 VARIANT="${AGENT_ORCH_VARIANT:-untagged}"
 RUN_IX="${AGENT_ORCH_RUN_IX:-0}"
 
-# Derive a default metrics file if the runner didn't set one.
-if [ -z "${AGENT_ORCH_METRICS_FILE:-}" ]; then
-  SID="$(echo "$PAYLOAD" | jq -r '.<session_id_path> // "unknown"')"
-  DEFAULT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-orch/metrics"
-  mkdir -p "$DEFAULT_DIR"
-  AGENT_ORCH_METRICS_FILE="$DEFAULT_DIR/$SID.jsonl"
-fi
+# Derive session_id from filename (the transcript is named <session-id>.jsonl).
+SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
 
-mkdir -p "$(dirname "$AGENT_ORCH_METRICS_FILE")"
-
-echo "$PAYLOAD" | jq -c \
+OUTPUT=$(jq -c \
   --arg scenario "$SCENARIO" \
   --arg variant "$VARIANT" \
   --argjson run_ix "$RUN_IX" \
-  '{
-    ts:             (now | todateiso8601),
-    session_id:     (.<session_id_path> // "unknown"),
-    scenario:       $scenario,
-    variant:        $variant,
-    run_ix:         $run_ix,
-    turn:           (.<turn_index_path> // 0),
-    model:          (.<model_path> // "unknown"),
-    tokens_in:      (.<tokens_in_path> // 0),
-    tokens_out:     (.<tokens_out_path> // 0),
-    cache_read:     (.<cache_read_path> // 0),
-    cache_creation: (.<cache_creation_path> // 0),
-    duration_ms:    (.<duration_ms_path> // 0),
-    skill_active:   (.<skill_active_path> // null)
-  }' >> "$AGENT_ORCH_METRICS_FILE"
+  --arg session_id "$SESSION_ID" \
+  '
+  [inputs]
+  | map(select(.message.usage))
+  | to_entries
+  | .[]
+  | {
+      ts:             (.value.timestamp // "unknown"),
+      session_id:     $session_id,
+      scenario:       $scenario,
+      variant:        $variant,
+      run_ix:         $run_ix,
+      turn:           (.key + 1),
+      model:          (.value.message.model // "unknown"),
+      tokens_in:      (.value.message.usage.input_tokens // 0),
+      tokens_out:     (.value.message.usage.output_tokens // 0),
+      cache_read:     (.value.message.usage.cache_read_input_tokens // 0),
+      cache_creation: (.value.message.usage.cache_creation_input_tokens // 0),
+      duration_ms:    0,
+      skill_active:   null
+    }
+  ' "$TRANSCRIPT")
+
+if [ -n "${AGENT_ORCH_METRICS_FILE:-}" ]; then
+  mkdir -p "$(dirname "$AGENT_ORCH_METRICS_FILE")"
+  echo "$OUTPUT" >> "$AGENT_ORCH_METRICS_FILE"
+else
+  echo "$OUTPUT"
+fi
 ```
 
-Replace each `<...>_path` placeholder with the concrete `jq` path from B1.
-
-- [ ] **Step 2: Make it executable**
+- [ ] **Step 2: Make it executable and run tests**
 
 ```bash
-chmod +x hooks/metric-capture.sh
+chmod +x scripts/extract-metrics.sh
+.bats/bin/bats tests/test_extract_metrics.bats
 ```
 
-- [ ] **Step 3: Run the test**
+Expected: 6/6 pass. If a test fails, common issues: jq path typo; `.timestamp` field absent on some lines (check fixture); `to_entries` vs explicit indexing.
+
+- [ ] **Step 3: Commit**
 
 ```bash
-.bats/bin/bats tests/test_metric_hook.bats
-```
-
-Expected: 3/3 pass. If a test fails, do NOT mark the task complete — fix the hook (common issues: wrong `jq` path; forgot to `chmod +x`; `jq` output not compact-mode).
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add hooks/metric-capture.sh
-git commit -m "feat: metric-capture hook emits one JSONL line per turn"
+git add scripts/extract-metrics.sh
+git commit -m "feat: extract-metrics emits per-turn JSONL from transcript"
 ```
 
 ---
 
-### Task B4: Register the hook in `settings/benchmark.settings.json`
-
-**Why:** The hook from B3 only runs if Claude Code knows about it. That wiring is configured in the settings file we introduced in A3.
-
-**Files:**
-- Modify: `settings/benchmark.settings.json`
-
-- [ ] **Step 1: Add the hook block**
-
-Replace the empty `"hooks": {}` with a registration for the event confirmed in B1. Example for `Stop`:
-
-```json
-"hooks": {
-  "Stop": [
-    { "command": "${CLAUDE_PROJECT_DIR}/hooks/metric-capture.sh" }
-  ]
-}
-```
-
-Use the event key that matches B1's decision. If `${CLAUDE_PROJECT_DIR}` substitution is not supported in the Claude Code version we target, fall back to an absolute path constructed by the runner — but confirm support first via B1.
-
-- [ ] **Step 2: Smoke-run the scenario**
-
-```bash
-# Ensure no stale metrics
-rm -rf ~/.local/share/agent-orch/metrics/
-
-./scripts/run-scenario.sh create-log-index local-hit
-```
-
-Expected: scenario passes AND one JSONL file appears under `~/.local/share/agent-orch/metrics/` with ≥1 line.
-
-- [ ] **Step 3: Inspect the captured metrics**
-
-```bash
-ls -la ~/.local/share/agent-orch/metrics/
-jq . ~/.local/share/agent-orch/metrics/*.jsonl | head -100
-```
-
-Sanity-check: `scenario` field says `untagged` (because the runner doesn't set env vars yet — that's Task B5's job) and `tokens_in` is > 0 for at least some turns.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add settings/benchmark.settings.json
-git commit -m "feat: register metric-capture hook in benchmark settings"
-```
-
----
-
-### Task B5: Wire runner env vars + per-run metrics file
-
-**Why:** The hook currently stamps every line as `untagged`. Runner must set scenario/variant/run_ix and point `AGENT_ORCH_METRICS_FILE` at a per-run path so multiple invocations don't all pile into one file.
+### Task B4: Wire the runner to invoke extract-metrics + env-var tagging
 
 **Files:**
 - Modify: `scripts/run-scenario.sh`
-- Modify: `tests/test_runner_contract.bats`
+- Modify: `tests/test_runner_contract.bats` (lock the new env-var surface)
 
 - [ ] **Step 1: Add env-var setup to the runner**
 
-Near the top of the real-run section in `run-scenario.sh`, after `SESSION_DIR=$(mktemp -d)`:
+Near the top of the real-run section, after `SESSION_DIR=$(mktemp -d)`:
 
 ```bash
 export AGENT_ORCH_SCENARIO="$SCENARIO"
@@ -664,7 +760,7 @@ export AGENT_ORCH_SESSION_DIR="$SESSION_DIR"
 export AGENT_ORCH_METRICS_FILE="$SESSION_DIR/metrics.jsonl"
 ```
 
-The runner accepts `RUN_IX` as an optional env var (not a CLI flag) to keep the CLI surface stable. The benchmark driver in Part C sets it per iteration.
+`RUN_IX` is an optional env var (not a CLI flag) — the benchmark driver in Part C sets it per iteration.
 
 - [ ] **Step 2: Route the handoff file through the session dir**
 
@@ -683,7 +779,7 @@ export AGENT_ORCH_HANDOFF_FILE="$HANDOFF_FILE"
 
 - [ ] **Step 2a: Update `pr-handoff/SKILL.md` to honor the env var**
 
-Read the current body of `fixtures/claude-plugin-observability/skills/pr-handoff/SKILL.md` and locate the concrete path it writes to. The current stub writes to a hard-coded path like `$FIXTURE_REPO/.stage-1-handoff.json`. Replace the path-derivation logic with this concrete block (adapt to the surrounding prose; the path line is what matters):
+Read the current `fixtures/claude-plugin-observability/skills/pr-handoff/SKILL.md` and locate the path it writes the handoff JSON to. Replace the path-derivation logic with:
 
 ```markdown
 ## Step 2 — Write the handoff JSON
@@ -693,14 +789,32 @@ Determine the output path:
 - If the environment variable `AGENT_ORCH_HANDOFF_FILE` is set (benchmark-harness mode), use its value verbatim.
 - Otherwise (standalone-run mode), use `$FIXTURE_REPO/.stage-1-handoff.json` where `$FIXTURE_REPO` is the path of the functional repo (same convention as Stage 1).
 
-Use the `Write` tool to write the payload JSON to that path. Do not use the `Bash` tool with `echo` / `cat <<EOF` — the `Write` tool is the correct contract.
+Use the `Write` tool to write the payload JSON to that path.
 ```
 
-This concrete before/after matters because Stage 1 showed SKILL.md prose is load-bearing for agent behavior. Prefer naming the mechanism (`Write` tool) over hand-waved "write the file." Commit this SKILL.md change in the same commit as the runner change (Step 6 below) so the env-var contract lands atomically on both sides.
+This concrete before/after matters because Stage 1 showed SKILL.md prose is load-bearing for agent behavior.
 
-- [ ] **Step 3: Extend `tests/test_runner_contract.bats` with DRY_RUN assertions for the new surface**
+- [ ] **Step 3: Invoke extract-metrics after `claude -p` exits**
 
-Add one test:
+After the `claude -p` block (and after `Scenario completed` echo), but before the assertion script invocation, add:
+
+```bash
+# Find the transcript Claude Code wrote for this session.
+PROJECT_SLUG=$(echo "$FIXTURE_REPO" | sed -e 's/[\\:/]/-/g' -e 's/^-*//')
+TRANSCRIPT_DIR="$HOME/.claude/projects/$PROJECT_SLUG"
+TRANSCRIPT=$(ls -t "$TRANSCRIPT_DIR"/*.jsonl 2>/dev/null | head -1)
+
+if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+  echo "WARN: no transcript found under $TRANSCRIPT_DIR; skipping metric extraction" >&2
+else
+  "$REPO_ROOT/scripts/extract-metrics.sh" "$TRANSCRIPT"
+  echo "Metrics: $AGENT_ORCH_METRICS_FILE ($(wc -l < "$AGENT_ORCH_METRICS_FILE") turns)"
+fi
+```
+
+The PROJECT_SLUG derivation uses Claude Code's convention of munging `\:/`-class chars to `-`. If that pattern breaks on Windows-style paths, the runner falls back to the most-recent transcript globally — acceptable since the runner runs serially.
+
+- [ ] **Step 4: Extend `tests/test_runner_contract.bats`**
 
 ```bash
 @test "DRY_RUN mode echoes scenario and variant in output" {
@@ -711,50 +825,28 @@ Add one test:
 }
 ```
 
-(The existing DRY_RUN line already prints these, so this is a characterization test to lock the contract.)
+(Existing DRY_RUN line already prints these; this characterization test locks the contract.)
 
-- [ ] **Step 4: Run bats**
-
-```bash
-.bats/bin/bats tests/
-```
-
-Expected: all tests pass.
-
-- [ ] **Step 5: Real scenario smoke with env vars**
-
-```bash
-rm -rf /tmp/stage2-metrics
-AGENT_ORCH_METRICS_FILE=/tmp/stage2-metrics.jsonl \
-  ./scripts/run-scenario.sh create-log-index local-hit
-
-# Inspect: scenario/variant should now be tagged correctly
-jq -r '[.scenario, .variant, .run_ix] | @tsv' /tmp/stage2-metrics.jsonl | head -5
-```
-
-Expected: each line reads `create-log-index\tlocal-hit\t0`.
-
-Note: the runner's own default (`$SESSION_DIR/metrics.jsonl`) wins when `AGENT_ORCH_METRICS_FILE` is pre-set as an env var on the command line — because the runner `export`s its value *after* that env var is inherited. Verify by leaving the override off:
+- [ ] **Step 5: Real scenario smoke**
 
 ```bash
 ./scripts/run-scenario.sh create-log-index local-hit
-# Look at the "Session artifacts in: $SESSION_DIR" path; metrics.jsonl should be inside
 ```
+
+Expected: scenario passes; runner reports `Metrics: <path>.jsonl (N turns)` with N ≈ 50-100; `cat <path>.jsonl | jq -r '[.scenario, .variant, .run_ix, .turn] | @tsv' | head` shows the right tags.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add scripts/run-scenario.sh tests/test_runner_contract.bats \
         fixtures/claude-plugin-observability/skills/pr-handoff/SKILL.md
-git commit -m "feat: runner sets scenario/variant/run_ix env + per-run paths
+git commit -m "feat: runner invokes extract-metrics after each scenario run
 
-Metrics file and handoff file both live under \$SESSION_DIR so concurrent
-benchmark iterations don't clobber each other. AGENT_ORCH_HANDOFF_FILE
-env var is the explicit contract with the pr-handoff skill."
+Adds per-run metrics file and per-run handoff path under \$SESSION_DIR
+so concurrent benchmark iterations don't clobber each other.
+AGENT_ORCH_HANDOFF_FILE env var is the explicit contract with the
+pr-handoff skill."
 ```
-
----
-
 # Part C — Benchmark driver + aggregator
 
 ### Task C1: Failing test for `scripts/aggregate-metrics.sh`

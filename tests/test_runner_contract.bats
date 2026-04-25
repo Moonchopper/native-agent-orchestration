@@ -25,3 +25,15 @@
   [[ "$output" == *"create-log-index"* ]]
   [[ "$output" == *"local-hit"* ]]
 }
+
+@test "runner DRY_RUN echoes run_ix=0 by default" {
+  DRY_RUN=1 run scripts/run-scenario.sh create-log-index local-hit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"run_ix=0"* ]]
+}
+
+@test "runner DRY_RUN honors RUN_IX env override" {
+  DRY_RUN=1 RUN_IX=7 run scripts/run-scenario.sh create-log-index local-hit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"run_ix=7"* ]]
+}

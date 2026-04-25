@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh auth status)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate)",
+      "Bash(terraform validate:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Skill"
+    ]
+  },
+  "enabledPlugins": {
+    "observability@native-agent-observability-local": true
+  },
+  "hooks": {}
+}

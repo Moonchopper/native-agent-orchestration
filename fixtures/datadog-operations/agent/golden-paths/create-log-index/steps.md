@@ -29,7 +29,7 @@
    - A PR body from the template below
    - The list of override rationales, if any
 
-8. **Hand off to the `_pr-handoff` skill** with the payload.
+8. **Hand off to the `pr-handoff` skill** with the payload.
 
 ## PR body template
 
