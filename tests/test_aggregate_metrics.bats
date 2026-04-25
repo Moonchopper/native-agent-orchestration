@@ -23,12 +23,14 @@ setup() {
   [[ "$output" == *"N=5"* ]] || [[ "$output" == *"| 5 "* ]]
 }
 
-@test "aggregate reports cache_ratio ~= 0.76 for the sample fixture" {
-  # Fixture sums: cache_read=13000, tokens_in=17000. Ratio = 13000/17000 ~= 0.7647.
-  # Aggregator truncates to 2 decimal places. (The plan doc said 0.78 / 16500
-  # but that was an arithmetic error in the plan; the actual sums are 13000 / 17000.)
+@test "aggregate reports cache_ratio ~= 0.43 for the sample fixture" {
+  # Fixture sums: cache_read=13000, tokens_in=17000, cache_creation=0.
+  # Ratio = cache_read / (cache_read + tokens_in + cache_creation) = 13000 / 30000 = 0.4333.
+  # Aggregator truncates to 2 decimal places. (Earlier formula was
+  # cache_read/tokens_in which gave nonsensical >>1 values on real Claude Code
+  # data where cache_read can be 1000x tokens_in.)
   run "$REPO_ROOT/scripts/aggregate-metrics.sh" "$FIXTURE"
-  [[ "$output" == *"0.76"* ]]
+  [[ "$output" == *"0.43"* ]]
 }
 
 @test "aggregate reports hot turn = 2 for the sample fixture" {

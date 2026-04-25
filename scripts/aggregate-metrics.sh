@@ -28,7 +28,8 @@ cat "$@" | jq -s -r '
         run_ix: .[0].run_ix,
         total:  (map(.tokens_in + .tokens_out) | add),
         cache_read_sum: (map(.cache_read) | add),
-        tokens_in_sum:  (map(.tokens_in)  | add)
+        tokens_in_sum:  (map(.tokens_in)  | add),
+        cache_creation_sum: (map(.cache_creation) | add)
       })),
     })
   | map(.runs |= sort_by(.total))
@@ -39,8 +40,9 @@ cat "$@" | jq -s -r '
       p50:      (.runs[(.runs | length / 2 | floor)].total),
       p95:      (.runs[((.runs | length) - 1)].total),
       cache_ratio: (
-        ([.runs[].cache_read_sum] | add) /
-        ([.runs[].tokens_in_sum]  | add | if . == 0 then 1 else . end)
+        ([.runs[].cache_read_sum] | add) as $cr
+        | ($cr + ([.runs[].tokens_in_sum] | add) + ([.runs[].cache_creation_sum] | add)) as $total
+        | if $total == 0 then 0 else $cr / $total end
       ),
       hot_turn: (
         .all_lines
