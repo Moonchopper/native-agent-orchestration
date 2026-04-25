@@ -11,9 +11,11 @@ for the architecture.
 
 ## Status
 
-- **Stage 1** — single scenario (`create-log-index / local-hit`) end-to-end. **This PoC.**
-- Stage 2 (planned) — measurement harness.
+- **Stage 1** — single scenario (`create-log-index / local-hit`) end-to-end. Merged via PR #1.
+- **Stage 2** — scenario hardening + measurement harness. **This PoC.** Open as PR #2.
 - Stage 3 (planned) — additional scenarios per doc 4.
+
+**Stage-2 calibration (N=5, `create-log-index / local-hit`):** P50 = 8755 tokens/invocation, P95 = 9356, cache_ratio = 0.96, hot_turn = 32. See [`docs/stage-2-notes.md`](docs/stage-2-notes.md) for the proposed Stage-3 budget tolerance and the full plan-deviation log.
 
 ## Prerequisites
 
@@ -31,22 +33,31 @@ Bats-core is **vendored** at `.bats/` (gitignored); the quickstart below clones 
 # Clone bats-core test runner (first-time only; gitignored, not committed)
 [ -d .bats ] || git clone --depth 1 https://github.com/bats-core/bats-core.git .bats
 
-# Install the fixture plugin into Claude Code's plugin directory
+# Enroll the fixture plugin via the project-local marketplace.
+# Writes a project-scoped enrollment to .claude/settings.json (gitignored).
 ./scripts/setup-plugin.sh
 
-# Run the scenario end-to-end
+# Run a single scenario end-to-end (~4 minutes, real claude -p spend)
 ./scripts/run-scenario.sh create-log-index local-hit
-```
+# Expected final line: "All assertions passed."
 
-Expected final line: `All assertions passed.`
+# Run the full measurement matrix (N=5, ~20 minutes)
+./scripts/run-benchmarks.sh --matrix scripts/matrix/stage-2-initial.tsv
+# Emits a markdown summary table with N, P50, P95, cache_ratio, hot_turn.
+
+# Or smoke-run at N=2 (~8 minutes)
+./scripts/run-benchmarks.sh --matrix scripts/matrix/stage-2-initial.tsv --n 2
+```
 
 ## Layout
 
-- `docs/` — research docs, architecture spec, and implementation plan.
-- `fixtures/claude-plugin-observability/` — mock platform-team plugin.
+- `docs/` — research docs, architecture spec, Stage-1 and Stage-2 implementation plans, and Stage-1 / Stage-2 handoff notes.
+- `.claude-plugin/marketplace.json` — local marketplace pointing at the fixture plugin (read by `claude plugin marketplace add`).
+- `fixtures/claude-plugin-observability/` — mock platform-team plugin (skills `create-log-index` and `pr-handoff`).
 - `fixtures/datadog-operations/` — mock functional repo with `agent/golden-paths/` and `agent/best-practices/`.
-- `scripts/` — runner, plugin setup, and scenario assertions.
-- `tests/` — bats-core tests for the runner CLI contract.
+- `settings/benchmark.settings.json` — `claude -p` runtime settings: tools allowlist + `enabledPlugins` for the fixture plugin.
+- `scripts/` — `run-scenario.sh` (single-run), `run-benchmarks.sh` (matrix driver), `extract-metrics.sh` (transcript → JSONL), `aggregate-metrics.sh` (JSONL → markdown table), `setup-plugin.sh` (plugin enrollment), `assertions/` (per-scenario), `matrix/` (TSV matrix files).
+- `tests/` — bats-core tests for the runner CLI contract, extract-metrics, aggregate-metrics, and run-benchmarks contract. Fixtures under `tests/fixtures/`.
 
 ## What this PoC does NOT do
 
@@ -58,18 +69,18 @@ See §3 of the architecture spec for the execution-model boundary.
 
 ## Between runs
 
-The scenario writes `fixtures/datadog-operations/.stage-1-handoff.json` and drafts
-`fixtures/datadog-operations/terraform/logs/indexes/foobar.tf`. Re-running the runner
-clears the handoff file automatically, but not the drafted Terraform. To reset the
-fixture for a clean run:
+The scenario writes `fixtures/datadog-operations/.stage-1-handoff.json` and drafts `fixtures/datadog-operations/terraform/logs/indexes/foobar.tf`. Both are gitignored as runtime artifacts; the runner clears them automatically before each run. No manual cleanup needed.
 
-```bash
-rm -f fixtures/datadog-operations/.stage-1-handoff.json \
-      fixtures/datadog-operations/terraform/logs/indexes/foobar.tf
-```
+## How metrics are captured
 
-## Known limitations (Stage 1)
+After `claude -p` exits, `run-scenario.sh` finds the session transcript that Claude Code wrote (under `~/.claude/projects/<project-slug>/<session-id>.jsonl`) and pipes it through `scripts/extract-metrics.sh`, which emits one JSONL line per assistant LLM call to `$AGENT_ORCH_METRICS_FILE` (default: `$SESSION_DIR/metrics.jsonl`). The benchmark driver collects per-run files and feeds them to `aggregate-metrics.sh` for the markdown summary.
 
-- Only one scenario (`create-log-index`) and one variant (`local-hit`) are exercised.
-- Runner uses `--permission-mode bypassPermissions` because the scenario runs inside a fixture sandbox; production use would narrow this via a settings file.
-- Fixture repo origins are fictional (`github.com/fixture-org/...`); the runner's freshness-check path is not exercised against a real remote in Stage 1.
+There is **no Stop hook** — early Stage-2 work found that the actual `claude -p` Stop payload carries no token data; transcript post-processing is simpler and equivalent. See `docs/stage-2-notes.md` for the full rationale.
+
+## Known limitations (Stage 2)
+
+- Only one scenario (`create-log-index`) and one variant (`local-hit`) are exercised. The `remote-fallback` and `cwd-shortcut` variants need new fixture states; additional scenarios need doc 4.
+- `pr-handoff` is still a JSON-writing stub; no real PR is opened.
+- `skill_active` and `duration_ms` in the per-turn metrics are emitted as `null` / `0` (not in the transcript schema; deferred to Stage 3).
+- Fixture repo origins are fictional (`github.com/fixture-org/...`); the runner's freshness-check path is not exercised against a real remote.
+- `setup-plugin.sh` writes a machine-specific path into `.claude/settings.json` (gitignored); each developer must run it once on a fresh clone.
