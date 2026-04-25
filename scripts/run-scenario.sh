@@ -72,11 +72,12 @@ EOF
 # the CWD-detection ladder hits its first branch.
 cd "$FIXTURE_REPO"
 
-# `claude -p` runs non-interactively. Permission mode `bypassPermissions`
-# is used because the scenario runs inside a fixture repo sandbox and there
-# is no interactive approver; Stage 2 will pass a settings.json with the
-# metric-capture hook and a narrower tool allowlist.
-claude -p --permission-mode bypassPermissions "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
+# `claude -p` runs non-interactively. We pass --settings pointing at
+# settings/benchmark.settings.json which provides an explicit
+# permissions.allow allowlist scoped to the tools create-log-index
+# exercises (git, gh auth, terraform fmt/validate, file ops, Skill).
+# Hook wiring lands in Task B4.
+claude -p --settings "$REPO_ROOT/settings/benchmark.settings.json" "$PROMPT" > "$SESSION_DIR/session.out" 2> "$SESSION_DIR/session.err" || {
   echo "ERROR: claude invocation failed" >&2
   echo "--- stderr ---" >&2
   cat "$SESSION_DIR/session.err" >&2
