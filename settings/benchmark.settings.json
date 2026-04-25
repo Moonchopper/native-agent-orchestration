@@ -14,5 +14,8 @@
       "Skill"
     ]
   },
+  "enabledPlugins": {
+    "observability@native-agent-observability-local": true
+  },
   "hooks": {}
 }

@@ -6,3 +6,8 @@ fixtures/*/.git
 
 # Vendored bats-core test runner — cloned on setup, not tracked
 .bats/
+
+# Claude Code project settings — written by `claude plugin marketplace add --scope project`
+# with an absolute machine-specific path; must not be committed.
+# Each developer re-generates this by running scripts/setup-plugin.sh.
+.claude/settings.json

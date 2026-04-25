@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Copies the fixture plugin into the user's Claude Code plugin directory.
-# Idempotent: re-running overwrites the existing installation.
+# Enroll the fixture plugin via the project-local marketplace at .claude-plugin/.
+# Idempotent: re-running adds nothing if the marketplace is already registered
+# and the plugin is already installed.
+#
+# NOTE: `claude plugin marketplace add` expects a directory that *contains*
+# .claude-plugin/marketplace.json — so we pass REPO_ROOT, not REPO_ROOT/.claude-plugin.
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
-SRC="$REPO_ROOT/fixtures/claude-plugin-observability"
-DEST_BASE="${CLAUDE_PLUGINS_DIR:-$HOME/.claude/plugins}"
-DEST="$DEST_BASE/observability-fixture"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MARKETPLACE_NAME="native-agent-observability-local"
+PLUGIN_NAME="observability"
 
-if [ ! -d "$SRC" ]; then
-  echo "ERROR: fixture plugin not found at $SRC" >&2
+[ -f "$REPO_ROOT/.claude-plugin/marketplace.json" ] || {
+  echo "ERROR: marketplace file not found at $REPO_ROOT/.claude-plugin/marketplace.json" >&2
   exit 1
-fi
+}
 
-mkdir -p "$DEST_BASE"
-rm -rf "$DEST"
-cp -R "$SRC" "$DEST"
+claude plugin marketplace add "$REPO_ROOT" --scope project || true
+claude plugin install "$PLUGIN_NAME@$MARKETPLACE_NAME" --scope project || true
 
-echo "Installed fixture plugin to: $DEST"
-echo "Verify Claude Code picks it up: claude /plugin list (or your local equivalent)"
+echo "Installed fixture plugin '$PLUGIN_NAME' from local marketplace '$MARKETPLACE_NAME'"
+echo "Verify: claude plugin list"
