@@ -207,6 +207,12 @@ else
   echo "Metrics: $AGENT_ORCH_METRICS_FILE ($TURNS turns)"
 fi
 
+# Export the transcript path so assertion scripts can do transcript-based
+# checks (e.g. cwd-shortcut verifies the detection ladder didn't probe
+# conventional paths). Set unconditionally — empty string if missing —
+# so assertion scripts can test for presence themselves.
+export TRANSCRIPT_PATH="${TRANSCRIPT:-}"
+
 # Run scenario-specific assertions.
 ASSERTION_SCRIPT="$REPO_ROOT/scripts/assertions/${SCENARIO}-${VARIANT}.sh"
 if [ -x "$ASSERTION_SCRIPT" ]; then
