@@ -15,7 +15,7 @@
     ]
   },
   "enabledPlugins": {
-    "observability@native-agent-observability-local": true
+    "observability@native-agent-observability": true
   },
   "hooks": {}
 }

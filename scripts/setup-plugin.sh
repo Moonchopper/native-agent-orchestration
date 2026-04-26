@@ -9,7 +9,7 @@ set -euo pipefail
 # .claude-plugin/marketplace.json — so we pass REPO_ROOT, not REPO_ROOT/.claude-plugin.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MARKETPLACE_NAME="native-agent-observability-local"
+MARKETPLACE_NAME="native-agent-observability"
 PLUGIN_NAME="observability"
 
 command -v claude >/dev/null 2>&1 || {
