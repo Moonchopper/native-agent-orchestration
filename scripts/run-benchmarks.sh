@@ -49,6 +49,18 @@ tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N; do
     fi
     echo "[bench] scenario=$SCENARIO variant=$VARIANT run_ix=$i"
     METRICS_PATH="$OUT_DIR/$SCENARIO-$VARIANT-$i.jsonl"
+
+    # remote-fallback requires NO clone at any conventional path before each
+    # run. The runner's preflight errors if a clone exists; we clean here so
+    # the matrix can iterate hermetically. (run-scenario.sh's preflight
+    # remains as a guardrail for manual single-shot runs.)
+    if [ "$VARIANT" = "remote-fallback" ]; then
+      rm -rf "$HOME/src/Moonchopper/datadog-operations" \
+             "$HOME/code/Moonchopper/datadog-operations" \
+             "$HOME/git/Moonchopper/datadog-operations" \
+             "$HOME/work/Moonchopper/datadog-operations"
+    fi
+
     RUN_IX="$i" \
     AGENT_ORCH_METRICS_FILE="$METRICS_PATH" \
       "$REPO_ROOT/scripts/run-scenario.sh" "$SCENARIO" "$VARIANT" \
