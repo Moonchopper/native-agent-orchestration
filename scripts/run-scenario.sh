@@ -190,9 +190,14 @@ echo "Handoff file: $HANDOFF_FILE"
 # Extract per-turn token metrics from Claude Code's session transcript.
 # The transcript path is derived from the cwd at claude -p invocation time:
 # Claude Code munges path separators (\ : /) to '-' to form the project slug.
-PROJECT_SLUG=$(echo "$INVOCATION_CWD" | sed -e 's/[\\:/.]/-/g' -e 's/^-*//')
+# On MSYS bash, $INVOCATION_CWD may be a POSIX-style path like /tmp/tmp.X
+# while Claude Code resolves it to the Windows form (C:/Users/.../tmp.X)
+# before slugifying. `pwd -W` returns the Windows path; fall back to the
+# raw INVOCATION_CWD on systems where -W is unavailable.
+WIN_CWD=$(cd "$INVOCATION_CWD" && pwd -W 2>/dev/null || echo "$INVOCATION_CWD")
+PROJECT_SLUG=$(echo "$WIN_CWD" | sed -e 's/[\\:/.]/-/g' -e 's/^-*//')
 TRANSCRIPT_DIR="$HOME/.claude/projects/$PROJECT_SLUG"
-TRANSCRIPT=$(ls -t "$TRANSCRIPT_DIR"/*.jsonl 2>/dev/null | head -1)
+TRANSCRIPT=$(ls -t "$TRANSCRIPT_DIR"/*.jsonl 2>/dev/null | head -1 || true)
 
 if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
   echo "WARN: no transcript found under $TRANSCRIPT_DIR; skipping metric extraction" >&2
