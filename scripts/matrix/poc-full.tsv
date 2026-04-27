@@ -1,0 +1,6 @@
+scenario	variant	n
+create-log-index	local-hit	5
+create-log-index	cwd-shortcut	5
+create-log-index	remote-fallback	5
+create-monitor	local-hit	5
+baseline	baseline	5
