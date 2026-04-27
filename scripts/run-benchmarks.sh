@@ -64,9 +64,13 @@ tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N _BUDGET; do
              "$HOME/work/Moonchopper/datadog-operations"
     fi
 
+    # Redirect stdin from /dev/null so claude -p (invoked inside run-scenario.sh)
+    # does NOT consume the matrix file's piped lines. Without this, the outer
+    # `tail | while read` loop's stdin gets swallowed and only row 1 runs.
     RUN_IX="$i" \
     AGENT_ORCH_METRICS_FILE="$METRICS_PATH" \
       "$REPO_ROOT/scripts/run-scenario.sh" "$SCENARIO" "$VARIANT" \
+      < /dev/null \
       > "$OUT_DIR/$SCENARIO-$VARIANT-$i.stdout" \
       2> "$OUT_DIR/$SCENARIO-$VARIANT-$i.stderr" \
       || echo "[bench] RUN FAILED: $SCENARIO / $VARIANT / $i (continuing)"
