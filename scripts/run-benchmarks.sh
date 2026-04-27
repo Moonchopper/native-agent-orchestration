@@ -39,7 +39,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 mkdir -p "$OUT_DIR"
 
 # Skip header line; iterate data rows.
-tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N; do
+# NOTE: trailing `_BUDGET` absorbs the optional 4th column so that `N` does
+# not pick up the rest of the line. The aggregator reads budgets directly
+# from the matrix; we only need (scenario, variant, n) here.
+tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N _BUDGET; do
   [ -n "$SCENARIO" ] || continue
   N="${N_OVERRIDE:-$N}"
   for i in $(seq 1 "$N"); do
@@ -77,4 +80,4 @@ fi
 echo ""
 echo "[bench] all runs complete. Metrics in: $OUT_DIR"
 echo ""
-"$REPO_ROOT/scripts/aggregate-metrics.sh" "$OUT_DIR"/*.jsonl
+"$REPO_ROOT/scripts/aggregate-metrics.sh" --matrix "$MATRIX" "$OUT_DIR"/*.jsonl
