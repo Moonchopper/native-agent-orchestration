@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "usage: run-scenario.sh <scenario> <variant>" >&2
-  echo "  scenarios: create-log-index" >&2
+  echo "  scenarios: create-log-index, create-monitor" >&2
   echo "  variants : local-hit, cwd-shortcut, remote-fallback" >&2
   exit 2
 }
@@ -14,7 +14,7 @@ SCENARIO="$1"
 VARIANT="$2"
 
 case "$SCENARIO" in
-  create-log-index) ;;
+  create-log-index|create-monitor) ;;
   *)
     echo "ERROR: unknown scenario '$SCENARIO'" >&2
     usage
@@ -127,7 +127,16 @@ rm -f "$HANDOFF_FILE"
 # Also clean any drafted Terraform from a prior run so re-runs are
 # self-contained and the agent's Step-8 diff reflects this run only.
 # Only if FIXTURE_REPO exists (remote-fallback creates it during the run).
-[ -d "$FIXTURE_REPO" ] && rm -f "$FIXTURE_REPO/terraform/logs/indexes/foobar.tf"
+if [ -d "$FIXTURE_REPO" ]; then
+  case "$SCENARIO" in
+    create-log-index)
+      rm -f "$FIXTURE_REPO/terraform/logs/indexes/foobar.tf"
+      ;;
+    create-monitor)
+      rm -f "$FIXTURE_REPO/terraform/monitors/foobar-api-error-rate.tf"
+      ;;
+  esac
+fi
 
 # Canned prompt — provides all inputs up front so the agent can proceed
 # without an interactive confirmation loop. For remote-fallback, prefix
@@ -140,11 +149,14 @@ if [ "$VARIANT" = "remote-fallback" ]; then
 "
 fi
 
-# NOTE: heredoc is unquoted (<<EOF, not <<'EOF') so ${CLONE_AUTHORIZATION}
-# expands. The rest of the body has no $-references that would expand
-# unintentionally.
-PROMPT=$(cat <<EOF
-${CLONE_AUTHORIZATION}Invoke the observability:create-log-index skill and execute its golden
+# Per-scenario prompt body. The heredocs are quoted (<<'EOF') so no $-
+# expansion happens inside; CLONE_AUTHORIZATION is concatenated separately
+# below. This keeps each scenario's body literal and avoids accidental
+# expansion of skill-internal references like ${var}.
+case "$SCENARIO" in
+  create-log-index)
+    PROMPT_BODY=$(cat <<'EOF'
+Invoke the observability:create-log-index skill and execute its golden
 path end-to-end. Do NOT enter brainstorming or planning mode. Do NOT ask
 for design approval — the golden path IS the approved design. Write
 files, run the checks, and hand off to pr-handoff directly.
@@ -160,6 +172,39 @@ Parameters (already confirmed by the operator):
 Accept best-practice suggestions as-is.
 EOF
 )
+    ;;
+  create-monitor)
+    PROMPT_BODY=$(cat <<'EOF'
+Invoke the observability:create-monitor skill and execute its golden
+path end-to-end. Do NOT enter brainstorming or planning mode.
+
+Parameters (already confirmed by the operator):
+- name: foobar-api-error-rate
+- team: foobar
+- env: prod
+- query: sum:foobar.api.errors{*}.as_rate() > 0.02
+- window: 5m
+- notify_target: @user-foo
+
+File-naming convention: draft the file as
+`terraform/monitors/foobar-api-error-rate.tf` (using the monitor name, not
+the team name) so multiple monitors per team can coexist.
+
+When the practice check raises a violation about notify_target, override
+with this rationale: "temporary while team rotation is being set up."
+Accept all other practice suggestions as-is.
+
+When you record the override and prepare the PR payload, append a
+`## Best-practice overrides` section to the PR body that lists each
+overridden practice and its rationale (the rationale text "temporary while
+team rotation is being set up." MUST appear verbatim in the PR body).
+EOF
+)
+    ;;
+esac
+
+# Prepend CLONE_AUTHORIZATION (only non-empty for remote-fallback variant).
+PROMPT="${CLONE_AUTHORIZATION}${PROMPT_BODY}"
 
 # System-level directive to prevent design-discussion mode.
 BENCH_SYSTEM_PROMPT='You are running inside an automated benchmark harness. Do not enter brainstorming, design-review, or planning modes. Do not ask the operator for approval on design decisions — the skill body IS the approved design. Execute golden paths end-to-end. If a referenced skill or tool is unavailable, halt with a clear error; do not substitute an alternative.'
