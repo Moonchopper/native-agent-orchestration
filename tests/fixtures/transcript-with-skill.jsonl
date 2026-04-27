@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"What is the capital of France? Answer in one word."},"uuid":"u1","timestamp":"2026-04-26T00:00:00.000Z","sessionId":"sess1","cwd":"/tmp/baseline"}
+{"parentUuid":"u1","isSidechain":false,"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"observability:create-log-index"}}],"usage":{"input_tokens":1,"output_tokens":10}},"uuid":"a1","timestamp":"2026-04-26T00:00:01.000Z","sessionId":"sess1"}

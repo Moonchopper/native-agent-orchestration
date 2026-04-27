@@ -3,8 +3,8 @@ set -euo pipefail
 
 usage() {
   echo "usage: run-scenario.sh <scenario> <variant>" >&2
-  echo "  scenarios: create-log-index, create-monitor" >&2
-  echo "  variants : local-hit, cwd-shortcut, remote-fallback" >&2
+  echo "  scenarios: create-log-index, create-monitor, baseline" >&2
+  echo "  variants : local-hit, cwd-shortcut, remote-fallback, baseline" >&2
   exit 2
 }
 
@@ -14,7 +14,7 @@ SCENARIO="$1"
 VARIANT="$2"
 
 case "$SCENARIO" in
-  create-log-index|create-monitor) ;;
+  create-log-index|create-monitor|baseline) ;;
   *)
     echo "ERROR: unknown scenario '$SCENARIO'" >&2
     usage
@@ -22,7 +22,7 @@ case "$SCENARIO" in
 esac
 
 case "$VARIANT" in
-  local-hit|cwd-shortcut|remote-fallback) ;;
+  local-hit|cwd-shortcut|remote-fallback|baseline) ;;
   *)
     echo "ERROR: unknown variant '$VARIANT'" >&2
     usage
@@ -103,6 +103,13 @@ case "$VARIANT" in
     FIXTURE_REPO="$HOME/src/Moonchopper/datadog-operations"
     INVOCATION_CWD="$SESSION_DIR"
     ;;
+
+  baseline)
+    # Off-topic cost floor: plugin enrolled, prompt unrelated to any skill.
+    # No fixture repo, no clone, no handoff. CWD = scratch dir.
+    FIXTURE_REPO=""
+    INVOCATION_CWD="$SESSION_DIR"
+    ;;
 esac
 
 # Single source of truth for where remote-fallback expects the clone to
@@ -110,7 +117,13 @@ esac
 # already-known; remote-fallback uses it in the PROMPT text.
 export EXPECTED_CLONE_PATH="$FIXTURE_REPO"
 
-HANDOFF_FILE="$FIXTURE_REPO/.stage-1-handoff.json"
+# Baseline has no fixture repo and produces no handoff; non-baseline scenarios
+# write the handoff to the fixture repo's .stage-1-handoff.json.
+if [ -n "$FIXTURE_REPO" ]; then
+  HANDOFF_FILE="$FIXTURE_REPO/.stage-1-handoff.json"
+else
+  HANDOFF_FILE=""
+fi
 
 # Tag this run's metrics with scenario/variant/run_ix so the aggregator
 # can group across runs. RUN_IX is set by the benchmark driver in Part C;
@@ -122,12 +135,16 @@ export AGENT_ORCH_SESSION_DIR="$SESSION_DIR"
 export AGENT_ORCH_METRICS_FILE="${AGENT_ORCH_METRICS_FILE:-$SESSION_DIR/metrics.jsonl}"
 
 # Clean any prior handoff artifact so the assertion reflects this run only.
-rm -f "$HANDOFF_FILE"
+# Baseline has no handoff so HANDOFF_FILE is empty — skip in that case.
+if [ -n "$HANDOFF_FILE" ]; then
+  rm -f "$HANDOFF_FILE"
+fi
 
 # Also clean any drafted Terraform from a prior run so re-runs are
 # self-contained and the agent's Step-8 diff reflects this run only.
-# Only if FIXTURE_REPO exists (remote-fallback creates it during the run).
-if [ -d "$FIXTURE_REPO" ]; then
+# Only if FIXTURE_REPO exists (remote-fallback creates it during the run;
+# baseline has no fixture repo at all).
+if [ -n "$FIXTURE_REPO" ] && [ -d "$FIXTURE_REPO" ]; then
   case "$SCENARIO" in
     create-log-index)
       rm -f "$FIXTURE_REPO/terraform/logs/indexes/foobar.tf"
@@ -135,6 +152,7 @@ if [ -d "$FIXTURE_REPO" ]; then
     create-monitor)
       rm -f "$FIXTURE_REPO/terraform/monitors/foobar-api-error-rate.tf"
       ;;
+    # baseline has no drafted file
   esac
 fi
 
@@ -201,6 +219,11 @@ team rotation is being set up." MUST appear verbatim in the PR body).
 EOF
 )
     ;;
+  baseline)
+    # Off-topic prompt: plugin is enrolled but no skill description should
+    # match. Token total here = the architectural denominator (cost floor).
+    PROMPT_BODY="What is the capital of France? Answer in one word."
+    ;;
 esac
 
 # Prepend CLONE_AUTHORIZATION (only non-empty for remote-fallback variant).
@@ -230,7 +253,9 @@ claude -p \
 }
 
 echo "Scenario completed. Session artifacts in: $SESSION_DIR"
-echo "Handoff file: $HANDOFF_FILE"
+if [ -n "$HANDOFF_FILE" ]; then
+  echo "Handoff file: $HANDOFF_FILE"
+fi
 
 # Extract per-turn token metrics from Claude Code's session transcript.
 # The transcript path is derived from the cwd at claude -p invocation time:
@@ -258,10 +283,20 @@ fi
 # so assertion scripts can test for presence themselves.
 export TRANSCRIPT_PATH="${TRANSCRIPT:-}"
 
-# Run scenario-specific assertions.
+# Run scenario-specific assertions. Baseline has no handoff file; its
+# assertion checks the transcript instead (no Skill(observability:*) tool_use).
+case "$SCENARIO" in
+  baseline)
+    ASSERTION_ARG="${TRANSCRIPT_PATH:-}"
+    ;;
+  *)
+    ASSERTION_ARG="$HANDOFF_FILE"
+    ;;
+esac
+
 ASSERTION_SCRIPT="$REPO_ROOT/scripts/assertions/${SCENARIO}-${VARIANT}.sh"
 if [ -x "$ASSERTION_SCRIPT" ]; then
-  "$ASSERTION_SCRIPT" "$HANDOFF_FILE"
+  "$ASSERTION_SCRIPT" "$ASSERTION_ARG"
 else
   echo "ERROR: no assertion script at $ASSERTION_SCRIPT" >&2
   echo "A scenario/variant pair that passes the runner's allowlist must have a matching assertion script." >&2
