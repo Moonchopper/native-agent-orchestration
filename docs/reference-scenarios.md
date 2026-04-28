@@ -48,11 +48,13 @@ A scenario does not need to cover all three variants. Variants are picked per sc
 
 The runner's job is to put the working tree in the right state before `claude -p` starts. This is what the three variants require.
 
+The functional repo `Moonchopper/datadog-operations` is a real GitHub-hosted repository; the agent retrieves content via clone or `gh api`. It is *not* a deployable Datadog Terraform project — see the repo's README for the fixture caveat.
+
 | Variant | Fixture-setup work in the runner |
 |---|---|
-| `local-hit` | Clone (or symlink to) `fixtures/datadog-operations/` at a path the detection ladder will find. Stage 2's runner sets `FIXTURE_REPO=...` and uses `cwd != $FIXTURE_REPO`. |
-| `cwd-shortcut` | Same clone setup as `local-hit`. Runner sets the `claude -p` CWD to `$FIXTURE_REPO`. |
-| `remote-fallback` | No clone on disk. The runner stages a temporary directory as CWD. The fixture repo is reachable via `gh api` against a real (or mocked-by-`gh-stub`) GitHub remote. The test driver answers the *"shall I clone?"* checkpoint with *"yes"*. |
+| `local-hit` | Clone `Moonchopper/datadog-operations` to `~/src/Moonchopper/datadog-operations`. The runner's CWD is a scratch directory, not the clone. |
+| `cwd-shortcut` | Same clone setup as `local-hit`. Runner's CWD is the clone. |
+| `remote-fallback` | No clone at any conventional path. The runner verifies absence; the agent's detection ladder must reach step 4 and offer to clone. |
 
 `remote-fallback` introduces real network or `gh` mocking complexity. Stage 3 should not block on a perfect mock — a working `gh api` call against a public fork of the fixture repo is sufficient signal.
 
@@ -69,7 +71,7 @@ The Team Foobar narrative from `problem-and-vision.md` §"Illustrative scenario.
 | Field | Value |
 |---|---|
 | Trigger | *"How do I create a log index in Datadog Prod for team Foobar?"* |
-| Pre-run fixture state | Clone at `~/src/Moonchopper/datadog-operations` (or whatever conventional path the detection ladder is configured for); CWD is a sibling temp dir. |
+| Pre-run fixture state | Runner clones `Moonchopper/datadog-operations` to `~/src/Moonchopper/datadog-operations` (refreshed to a clean state on re-runs). CWD is the run's scratch directory, not the clone. |
 | Inputs | `name=foobar-prod`, `filter=service:foobar-api env:prod`, `tier=Flex`, `days=30`, `quota=1000000000`. |
 | Expected drafted artifact | `terraform/logs/indexes/foobar.tf` containing a single `datadog_logs_index` resource with the inputs above, formatted by `terraform fmt`. |
 | Practice checks expected to fire | `index-naming` (no-op — name conforms), `query-cost-awareness` (no-op — Flex), `retention-tier-selection` (no-op — Flex). All three load both pre- and post-draft. |
@@ -80,7 +82,7 @@ This is the row already in [scripts/matrix/stage-2-initial.tsv](../scripts/matri
 
 #### 5.1.2 Variant: `cwd-shortcut`
 
-Same trigger, same inputs, same expected artifact as 5.1.1. The single difference is fixture state: CWD is `$FIXTURE_REPO`. The detection ladder's step 1 (CWD match) should win.
+Same trigger, same inputs, same expected artifact as 5.1.1. The single difference is fixture state: **Pre-run fixture state**: Same clone setup as 5.1.1. Runner's CWD is the clone. The detection ladder's step 1 (CWD match) should win.
 
 **What this scenario must additionally prove:**
 
@@ -93,7 +95,7 @@ Same trigger, same inputs, same expected artifact as 5.1.1. The single differenc
 
 #### 5.1.3 Variant: `remote-fallback`
 
-Same trigger and inputs as 5.1.1. Pre-run state has no clone. The test driver answers the agent's *"shall I clone it for you?"* prompt with *"yes, clone it"* (default path or any pre-configured one).
+Same trigger and inputs as 5.1.1. **Pre-run fixture state**: No clone at any conventional path. Runner verifies absence pre-flight (errors if any conventional path has a `.git`). The test driver answers the agent's *"shall I clone it for you?"* prompt with *"yes, clone it"* (default path or any pre-configured one).
 
 **What this scenario must additionally prove:**
 
@@ -193,7 +195,7 @@ If any of these become load-bearing later, they can be promoted into the matrix 
 
 Resolved when the implementation plan is written, not here. Doc 4 names them so they aren't lost.
 
-- **Where the `create-monitor` fixture content lives.** Same `fixtures/datadog-operations` repo (consistent with the colocate-with-function principle), or a separate fixture repo to demonstrate cross-functional-repo routing? Inclination: same repo. The cross-repo case is a future concern, and the PoC's premise is one functional repo per topic *cluster*, not per topic.
+- **Where the `create-monitor` fixture content lives.** Same `Moonchopper/datadog-operations` repo (consistent with the colocate-with-function principle), or a separate fixture repo to demonstrate cross-functional-repo routing? Inclination: same repo. The cross-repo case is a future concern, and the PoC's premise is one functional repo per topic *cluster*, not per topic.
 - **Whether `remote-fallback` runs against a real public GitHub fork or a `gh`-CLI mock.** Real fork is simpler to set up but couples the matrix run to network availability. A `gh` mock is more hermetic but real engineering work. Inclination: real public fork; flag the network dependency in the matrix runner's preamble.
 - **Whether `baseline` runs *with* or *without* the plugin enrolled.** Architecture spec §11.5 frames it as "plugin installed, off-topic question." That is the right call. A second variant (`baseline-no-plugin`) might surface plugin overhead more starkly, but it tests Claude Code's behavior rather than this PoC's, and is out of scope.
 - **Whether to re-derive the `local-hit` budget after Stage 3's broader changes.** Stage 2's number was measured against a single matrix row in isolation. If Stage 3 changes anything that touches the `create-log-index/local-hit` flow (e.g. a generic-ified skill body extracted for reuse with `create-monitor`), the budget should be re-derived. If not, the existing 11228 stands.

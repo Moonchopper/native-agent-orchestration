@@ -52,9 +52,10 @@ Bats-core is **vendored** at `.bats/` (gitignored); the quickstart below clones 
 ## Layout
 
 - `docs/` — research docs, architecture spec, Stage-1 and Stage-2 implementation plans, and Stage-1 / Stage-2 handoff notes.
-- `.claude-plugin/marketplace.json` — local marketplace pointing at the fixture plugin (read by `claude plugin marketplace add`).
-- `fixtures/claude-plugin-observability/` — mock platform-team plugin (skills `create-log-index` and `pr-handoff`).
-- `fixtures/datadog-operations/` — mock functional repo with `agent/golden-paths/` and `agent/best-practices/`.
+- `.claude-plugin/marketplace.json` — local marketplace pointing at the remote fixture plugin (read by `claude plugin marketplace add`).
+- Fixture content lives in two standalone GitHub repos under `Moonchopper/`:
+  - [`Moonchopper/claude-plugin-observability`](https://github.com/Moonchopper/claude-plugin-observability) — mock platform-team plugin (skills `create-log-index` and `pr-handoff`). Installed by `setup-plugin.sh`.
+  - [`Moonchopper/datadog-operations`](https://github.com/Moonchopper/datadog-operations) — mock functional repo with `agent/golden-paths/` and `agent/best-practices/`. Cloned by the runner per-variant.
 - `settings/benchmark.settings.json` — `claude -p` runtime settings: tools allowlist + `enabledPlugins` for the fixture plugin.
 - `scripts/` — `run-scenario.sh` (single-run), `run-benchmarks.sh` (matrix driver), `extract-metrics.sh` (transcript → JSONL), `aggregate-metrics.sh` (JSONL → markdown table), `setup-plugin.sh` (plugin enrollment), `assertions/` (per-scenario), `matrix/` (TSV matrix files).
 - `tests/` — bats-core tests for the runner CLI contract, extract-metrics, aggregate-metrics, and run-benchmarks contract. Fixtures under `tests/fixtures/`.
@@ -69,7 +70,7 @@ See §3 of the architecture spec for the execution-model boundary.
 
 ## Between runs
 
-The scenario writes `fixtures/datadog-operations/.stage-1-handoff.json` and drafts `fixtures/datadog-operations/terraform/logs/indexes/foobar.tf`. Both are gitignored as runtime artifacts; the runner clears them automatically before each run. No manual cleanup needed.
+The runner clones `Moonchopper/datadog-operations` to `~/src/Moonchopper/datadog-operations` and resets it to a clean state before each run. Drafted artifacts (e.g. `terraform/logs/indexes/foobar.tf` and `.stage-1-handoff.json`) live inside that clone — they're created during the run and discarded by the next `git reset --hard` + `clean -fd`. No manual cleanup needed.
 
 ## How metrics are captured
 

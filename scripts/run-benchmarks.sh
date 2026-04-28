@@ -39,7 +39,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 mkdir -p "$OUT_DIR"
 
 # Skip header line; iterate data rows.
-tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N; do
+# NOTE: trailing `_BUDGET` absorbs the optional 4th column so that `N` does
+# not pick up the rest of the line. The aggregator reads budgets directly
+# from the matrix; we only need (scenario, variant, n) here.
+tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N _BUDGET; do
   [ -n "$SCENARIO" ] || continue
   N="${N_OVERRIDE:-$N}"
   for i in $(seq 1 "$N"); do
@@ -49,9 +52,25 @@ tail -n +2 "$MATRIX" | while IFS=$'\t' read -r SCENARIO VARIANT N; do
     fi
     echo "[bench] scenario=$SCENARIO variant=$VARIANT run_ix=$i"
     METRICS_PATH="$OUT_DIR/$SCENARIO-$VARIANT-$i.jsonl"
+
+    # remote-fallback requires NO clone at any conventional path before each
+    # run. The runner's preflight errors if a clone exists; we clean here so
+    # the matrix can iterate hermetically. (run-scenario.sh's preflight
+    # remains as a guardrail for manual single-shot runs.)
+    if [ "$VARIANT" = "remote-fallback" ]; then
+      rm -rf "$HOME/src/Moonchopper/datadog-operations" \
+             "$HOME/code/Moonchopper/datadog-operations" \
+             "$HOME/git/Moonchopper/datadog-operations" \
+             "$HOME/work/Moonchopper/datadog-operations"
+    fi
+
+    # Redirect stdin from /dev/null so claude -p (invoked inside run-scenario.sh)
+    # does NOT consume the matrix file's piped lines. Without this, the outer
+    # `tail | while read` loop's stdin gets swallowed and only row 1 runs.
     RUN_IX="$i" \
     AGENT_ORCH_METRICS_FILE="$METRICS_PATH" \
       "$REPO_ROOT/scripts/run-scenario.sh" "$SCENARIO" "$VARIANT" \
+      < /dev/null \
       > "$OUT_DIR/$SCENARIO-$VARIANT-$i.stdout" \
       2> "$OUT_DIR/$SCENARIO-$VARIANT-$i.stderr" \
       || echo "[bench] RUN FAILED: $SCENARIO / $VARIANT / $i (continuing)"
@@ -65,4 +84,4 @@ fi
 echo ""
 echo "[bench] all runs complete. Metrics in: $OUT_DIR"
 echo ""
-"$REPO_ROOT/scripts/aggregate-metrics.sh" "$OUT_DIR"/*.jsonl
+"$REPO_ROOT/scripts/aggregate-metrics.sh" --matrix "$MATRIX" "$OUT_DIR"/*.jsonl

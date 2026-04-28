@@ -1,9 +1,6 @@
 .superpowers/
 .worktrees/
 
-# Nested fixture git repos — track the working tree, ignore the git state
-fixtures/*/.git
-
 # Vendored bats-core test runner — cloned on setup, not tracked
 .bats/
 
@@ -11,8 +8,3 @@ fixtures/*/.git
 # with an absolute machine-specific path; must not be committed.
 # Each developer re-generates this by running scripts/setup-plugin.sh.
 .claude/settings.json
-
-# Scenario runtime artifacts — written by run-scenario.sh into the fixture repo.
-# Each run produces these; they're inputs to the assertion script, not source.
-fixtures/datadog-operations/.stage-1-handoff.json
-fixtures/datadog-operations/terraform/logs/indexes/*.tf

@@ -37,3 +37,23 @@
   [ "$status" -eq 0 ]
   [[ "$output" == *"run_ix=7"* ]]
 }
+
+@test "DRY_RUN reports cwd-shortcut variant" {
+  run env DRY_RUN=1 RUN_IX=2 ./scripts/run-scenario.sh create-log-index cwd-shortcut
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"scenario=create-log-index"* ]]
+  [[ "$output" == *"variant=cwd-shortcut"* ]]
+  [[ "$output" == *"run_ix=2"* ]]
+}
+
+@test "DRY_RUN reports remote-fallback variant" {
+  run env DRY_RUN=1 RUN_IX=0 ./scripts/run-scenario.sh create-log-index remote-fallback
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"variant=remote-fallback"* ]]
+}
+
+@test "runner rejects unknown variant" {
+  run ./scripts/run-scenario.sh create-log-index banana-split
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown variant"* ]]
+}

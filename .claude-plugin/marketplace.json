@@ -1,11 +1,14 @@
 {
-  "name": "native-agent-observability-local",
+  "name": "native-agent-observability",
   "owner": { "name": "native-agent-orchestration" },
   "plugins": [
     {
       "name": "observability",
-      "source": "./fixtures/claude-plugin-observability",
-      "description": "PoC fixture plugin: skills for Datadog observability golden paths"
+      "source": {
+        "source": "url",
+        "url": "https://github.com/Moonchopper/claude-plugin-observability.git"
+      },
+      "description": "PoC plugin: skills for Datadog observability golden paths"
     }
   ]
 }
